@@ -1,5 +1,4 @@
 {-# LANGUAGE BangPatterns #-}
-{-# LANGUAGE CPP #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE MagicHash #-}
 {-# LANGUAGE NamedFieldPuns #-}
@@ -7,6 +6,8 @@
 {-# LANGUAGE RoleAnnotations #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE UnboxedTuples #-}
+{-# LANGUAGE DeriveDataTypeable #-}
+{-# LANGUAGE DeriveGeneric #-}
 
 module Data.Vector.Persistent.Internal
   ( module Data.Vector.Persistent.Internal,
@@ -18,6 +19,9 @@ import Data.Vector.Persistent.Internal.Array (Array)
 import qualified Data.Vector.Persistent.Internal.Array as Array
 import GHC.Stack (HasCallStack)
 import Prelude hiding (init, length, null, tail)
+import Data.Typeable (Typeable)
+import GHC.Generics (Generic)
+import Data.Data
 
 keyBits :: Int
 keyBits = 5
@@ -36,7 +40,7 @@ data Vector a = RootNode
     shift :: !Int,
     init :: !(Array (Node a)),
     tail :: !(Array a)
-  }
+  } deriving (Data, Typeable, Generic)
 
 instance Eq a => Eq (Vector a) where
   (==) = persistentVectorEq
@@ -45,6 +49,7 @@ instance Eq a => Eq (Vector a) where
 data Node a
   = InternalNode !(Array (Node a))
   | DataNode !(Array a)
+  deriving (Data, Typeable, Generic)
 
 instance Eq a => Eq (Node a) where
   (==) = nodeEq
@@ -128,16 +133,27 @@ snocMain vec@RootNode {size, shift, tail} a
 pushTail :: Int -> Array a -> Int -> Array (Node a) -> Array (Node a)
 pushTail size tail = go
   where
-    go !level !parent
-      -- automatically insert it into the parent when we are at the last parent
-      | level == keyBits = Array.snoc parent $! DataNode tail
-      | subIx < Array.length parent =
-          let children = case Array.index parent subIx of
-                InternalNode ns -> ns
-                _ -> impossibleError
-           in Array.update parent subIx $! InternalNode $ go (next level) children
-      | otherwise = Array.snoc parent $! newPath (next level) tail
+    go !level !parent = Array.updateResize parent nodeWidth subIx toInsert
+      -- -- automatically insert it into the parent when we are at the last parent
+      -- | level == keyBits = Array.snoc parent $! DataNode tail
+      -- | subIx < Array.length parent =
+      --     let children = case Array.index parent subIx of
+      --           InternalNode ns -> ns
+      --           _ -> error "impossible"
+      --      in Array.update parent subIx $! InternalNode $ go (next level) children
+      -- | otherwise = Array.snoc parent $! newPath (next level) tail
       where
+        toInsert =
+          if level == keyBits
+            then DataNode tail
+            else
+              if subIx < Array.length parent
+                then
+                  let children = case Array.index parent subIx of
+                        InternalNode ns -> ns
+                        _ -> error "impossible"
+                   in InternalNode $ go (next level) children
+                else newPath (next level) tail
         -- we subtract one because we want to find where the tail goes
         -- we don't care about the least significant bits as we are only inserting into the parent
         -- this means that subtracting one will do
