@@ -19,6 +19,9 @@ new_ :: PrimMonad m => Int -> m (MArray (PrimState m) a)
 new_ n = new n undefinedElem
 {-# INLINE new_ #-}
 
+run :: (forall s. ST s (SmallMutableArray s a)) -> SmallArray a
+run = runSmallArray
+
 create :: Int -> a -> (forall s. SmallMutableArray s a -> ST s ()) -> SmallArray a
 create = createSmallArray
 {-# INLINE create #-}
@@ -48,7 +51,7 @@ index = indexSmallArray
 {-# INLINE index #-}
 
 update :: Array a -> Int -> a -> Array a
-update arr i a = runSmallArray $ do
+update arr i a = run $ do
   marr <- thaw arr
   writeSmallArray marr i a
   pure marr
@@ -63,7 +66,7 @@ empty = emptySmallArray
 {-# INLINE empty #-}
 
 singleton :: a -> Array a
-singleton a = runSmallArray $ new 1 a
+singleton a = run $ new 1 a
 {-# INLINE singleton #-}
 
 fromListN :: Int -> [a] -> SmallArray a
