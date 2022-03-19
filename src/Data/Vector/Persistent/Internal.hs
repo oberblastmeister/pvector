@@ -16,6 +16,7 @@ where
 import Data.Bits (Bits, shiftL, shiftR, (.&.))
 import Data.Vector.Persistent.Internal.Array (Array)
 import qualified Data.Vector.Persistent.Internal.Array as Array
+import GHC.Stack (HasCallStack)
 import Prelude hiding (init, length, null, tail)
 
 keyBits :: Int
@@ -88,16 +89,14 @@ null xs = length xs == 0
 
 infixl 8 .<<., .>>.
 
--- snoc :: Vector a -> a -> Vector a
--- snoc v@RootNode {size, tail} a =
---   if tailSize == keyMask
---     then undefined
---     else undefined
---   where
---     tailSize = size .&. keyMask
---     initSize = size - tailSize
---     size' = size + 1
---     tail' = Array.update tail tailSize a
+-- | \( O(1) \) Append an element to the end of the vector.
+snoc :: Vector a -> a -> Vector a
+snoc vec@RootNode {size, tail} a
+  -- Room in tail, and vector non-empty
+  | size .&. keyMask /= 0 = vec {tail = Array.snoc tail a, size = size + 1}
+  | otherwise = snocMain vec a
+{-# INLINE snoc #-}
+
 snocMain :: Vector a -> a -> Vector a
 snocMain vec a
   | null vec = singleton a
@@ -135,7 +134,7 @@ pushTail size tail = go
       | subIx < Array.length parent =
           let children = case Array.index parent subIx of
                 InternalNode ns -> ns
-                _ -> error "impossible"
+                _ -> impossibleError
            in Array.update parent subIx $! InternalNode $ go (next level) children
       | otherwise = Array.snoc parent $! newPath (next level) tail
       where
@@ -154,11 +153,28 @@ unsafeIndex vec ix
   | otherwise = go (next $ shift vec) (Array.index (init vec) (ix .<<. shift vec))
   where
     go 0 (DataNode as) = Array.index as (ix .&. keyMask)
-    go 0 (InternalNode _) = error "impossible"
+    go 0 (InternalNode _) = impossibleError
     go level (InternalNode ns) = go (next level) (Array.index ns ix')
       where
         ix' = (ix .<<. level) .&. keyMask
-    go _level (DataNode _) = error "impossible"
+    go _level (DataNode _) = impossibleError
+
+indexMaybe :: Vector a -> Int -> Maybe a
+indexMaybe vec ix
+  -- Check if the index is valid. This funny business uses a single test to
+  -- determine whether ix is too small (negative) or too large (at least the
+  -- length of the vector).
+  | (fromIntegral ix :: Word) < fromIntegral (length vec) =
+      Just $ unsafeIndex vec ix
+  | otherwise = Nothing
+{-# INLINE indexMaybe #-}
+
+index :: Vector a -> Int -> a
+index vec ix
+  | ix < 0 = moduleError "index" $ "negative index: " ++ show ix
+  | ix >= length vec = moduleError "index" $ "index too large: " ++ show ix
+  | otherwise = unsafeIndex vec ix
+{-# INLINE index #-}
 
 -- | The index of the first element of the tail of the vector (that is, the
 -- *last* element of the list representing the tail). This is also the number
@@ -181,3 +197,11 @@ next level = level - keyBits
 prev :: Int -> Int
 prev level = level + keyBits
 {-# INLINE prev #-}
+
+impossibleError :: forall a. HasCallStack => a
+impossibleError = moduleError "impossibleError" "this should be impossible!"
+{-# NOINLINE impossibleError #-}
+
+moduleError :: forall a. HasCallStack => String -> String -> a
+moduleError fun msg = error ("Data.Vector.Persistent.Internal" ++ fun ++ ':' : ' ' : msg)
+{-# NOINLINE moduleError #-}
