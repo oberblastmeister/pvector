@@ -90,6 +90,7 @@ library
     Data.Vector.Persistent
     Data.Vector.Persistent.Internal
     Data.Vector.Persistent.Internal.Array
+    Data.Vector.Persistent.Internal.Array.Unsafe
 
 common rtsopts
   ghc-options:
