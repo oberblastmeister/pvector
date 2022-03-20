@@ -1,27 +1,27 @@
 {-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE DeriveDataTypeable #-}
+{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE MagicHash #-}
 {-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE RoleAnnotations #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE UnboxedTuples #-}
-{-# LANGUAGE DeriveDataTypeable #-}
-{-# LANGUAGE DeriveGeneric #-}
 
 module Data.Vector.Persistent.Internal
   ( module Data.Vector.Persistent.Internal,
   )
 where
 
-import Data.Bits (Bits, shiftL, shiftR, (.&.))
+import Data.Bits (Bits, unsafeShiftL, unsafeShiftR, (.&.))
+import Data.Data
 import Data.Vector.Persistent.Internal.Array (Array)
 import qualified Data.Vector.Persistent.Internal.Array as Array
+import GHC.Generics (Generic)
 import GHC.Stack (HasCallStack)
 import Prelude hiding (init, length, null, tail)
-import Data.Typeable (Typeable)
-import GHC.Generics (Generic)
-import Data.Data
 
 keyBits :: Int
 keyBits = 5
@@ -40,15 +40,16 @@ data Vector a = RootNode
     shift :: !Int,
     init :: !(Array (Node a)),
     tail :: !(Array a)
-  } deriving (Data, Typeable, Generic)
+  }
+  deriving (Data, Typeable, Generic)
 
 instance Eq a => Eq (Vector a) where
   (==) = persistentVectorEq
   {-# INLINE (==) #-}
 
 data Node a
-  = InternalNode !(Array (Node a))
-  | DataNode !(Array a)
+  = InternalNode {getInternalNode :: !(Array (Node a))}
+  | DataNode {getDataNode :: !(Array a)}
   deriving (Data, Typeable, Generic)
 
 instance Eq a => Eq (Node a) where
@@ -83,13 +84,14 @@ empty = RootNode {size = 0, shift = keyBits, init = Array.empty, tail = Array.em
 
 null :: Vector a -> Bool
 null xs = length xs == 0
+{-# INLINE null #-}
 
 (.<<.) :: Bits a => a -> Int -> a
-(.<<.) = shiftR
+(.<<.) = unsafeShiftL
 {-# INLINE (.<<.) #-}
 
 (.>>.) :: Bits a => a -> Int -> a
-(.>>.) = shiftL
+(.>>.) = unsafeShiftR
 {-# INLINE (.>>.) #-}
 
 infixl 8 .<<., .>>.
@@ -98,13 +100,12 @@ infixl 8 .<<., .>>.
 snoc :: Vector a -> a -> Vector a
 snoc vec@RootNode {size, tail} a
   -- Room in tail, and vector non-empty
-  | size .&. keyMask /= 0 = vec {tail = Array.snoc tail a, size = size + 1}
+  | (size .&. keyMask) /= 0 = vec {tail = Array.update tail (size .&. keyMask) a, size = size + 1}
   | otherwise = snocMain vec a
 {-# INLINE snoc #-}
 
 snocMain :: Vector a -> a -> Vector a
-snocMain vec a
-  | null vec = singleton a
+snocMain vec a | null vec = singleton a
 snocMain vec@RootNode {size, shift, tail} a
   -- Overflow current root
   -- how much the root can contain
@@ -112,10 +113,10 @@ snocMain vec@RootNode {size, shift, tail} a
   -- how much each children can contain times number of children (how much the root can contain)
   --   (1 `shiftL` sh) * 32
   -- how much each children has right now > how much each children can contain
-  | size .<<. keyBits > 1 .>>. shift =
+  | size .>>. keyBits > 1 .<<. shift =
       RootNode
         { size = size + 1,
-          shift = prev shift,
+          shift = shift + keyBits,
           init =
             let !path = newPath shift tail
              in Array.fromListN 2 [InternalNode (init vec), path],
@@ -133,27 +134,15 @@ snocMain vec@RootNode {size, shift, tail} a
 pushTail :: Int -> Array a -> Int -> Array (Node a) -> Array (Node a)
 pushTail size tail = go
   where
-    go !level !parent = Array.updateResize parent nodeWidth subIx toInsert
-      -- -- automatically insert it into the parent when we are at the last parent
-      -- | level == keyBits = Array.snoc parent $! DataNode tail
-      -- | subIx < Array.length parent =
-      --     let children = case Array.index parent subIx of
-      --           InternalNode ns -> ns
-      --           _ -> error "impossible"
-      --      in Array.update parent subIx $! InternalNode $ go (next level) children
-      -- | otherwise = Array.snoc parent $! newPath (next level) tail
+    go !level !parent = Array.update parent subIx toInsert
       where
-        toInsert =
-          if level == keyBits
-            then DataNode tail
-            else
-              if subIx < Array.length parent
-                then
-                  let children = case Array.index parent subIx of
-                        InternalNode ns -> ns
-                        _ -> error "impossible"
-                   in InternalNode $ go (next level) children
-                else newPath (next level) tail
+        toInsert
+          | level == keyBits = DataNode tail
+          | subIx < Array.length parent =
+              let children = getInternalNode $ Array.index parent subIx
+               in InternalNode $ go (level - keyBits) children
+          | otherwise = newPath (level - keyBits) tail
+
         -- we subtract one because we want to find where the tail goes
         -- we don't care about the least significant bits as we are only inserting into the parent
         -- this means that subtracting one will do
@@ -161,18 +150,18 @@ pushTail size tail = go
 
 newPath :: Int -> Array a -> Node a
 newPath 0 tail = DataNode tail
-newPath level tail = InternalNode $ Array.singleton $! newPath (next level) tail
+newPath level tail = InternalNode $ Array.singleton $! newPath (level - keyBits) tail
 
 unsafeIndex :: Vector a -> Int -> a
 unsafeIndex vec ix
   | ix >= tailOffset vec = Array.index (tail vec) (ix .&. keyMask)
-  | otherwise = go (next $ shift vec) (Array.index (init vec) (ix .<<. shift vec))
+  | otherwise = go (shift vec - keyBits) (Array.index (init vec) (ix .>>. shift vec))
   where
     go 0 (DataNode as) = Array.index as (ix .&. keyMask)
     go 0 (InternalNode _) = impossibleError
-    go level (InternalNode ns) = go (next level) (Array.index ns ix')
+    go level (InternalNode ns) = go (level - keyBits) (Array.index ns ix')
       where
-        ix' = (ix .<<. level) .&. keyMask
+        ix' = (ix .>>. level) .&. keyMask
     go _level (DataNode _) = impossibleError
 
 indexMaybe :: Vector a -> Int -> Maybe a
@@ -192,6 +181,25 @@ index vec ix
   | otherwise = unsafeIndex vec ix
 {-# INLINE index #-}
 
+update :: Vector a -> Int -> a -> Vector a
+update vec@RootNode {size, shift, tail} ix a
+  -- Invalid index. This funny business uses a single test to determine whether
+  -- ix is too small (negative) or too large (at least sz).
+  | (fromIntegral ix :: Word) >= fromIntegral size = vec
+  | ix >= tailOffset vec = vec {tail = Array.update tail (ix .&. keyMask) a}
+  | otherwise = vec {init = go shift (init vec)}
+  where
+    go level vec
+      | level == 5 =
+          let !node = DataNode $ Array.update (getDataNode vec') (ix .&. keyMask) a
+           in Array.update vec ix' node
+      | otherwise =
+          let !node = go (level - keyBits) (getInternalNode vec')
+           in Array.update vec ix' (InternalNode node)
+      where
+        ix' = (ix .>>. level) .&. keyBits
+        vec' = Array.index vec ix'
+
 -- | The index of the first element of the tail of the vector (that is, the
 -- *last* element of the list representing the tail). This is also the number
 -- of elements stored in the array tree.
@@ -206,17 +214,8 @@ length :: Vector a -> Int
 length = size
 {-# INLINE length #-}
 
-next :: Int -> Int
-next level = level - keyBits
-{-# INLINE next #-}
-
-prev :: Int -> Int
-prev level = level + keyBits
-{-# INLINE prev #-}
-
-impossibleError :: forall a. HasCallStack => a
-impossibleError = moduleError "impossibleError" "this should be impossible!"
-{-# NOINLINE impossibleError #-}
+impossibleError :: forall a. a
+impossibleError = error "this should be impossible"
 
 moduleError :: forall a. HasCallStack => String -> String -> a
 moduleError fun msg = error ("Data.Vector.Persistent.Internal" ++ fun ++ ':' : ' ' : msg)
