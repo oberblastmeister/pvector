@@ -4,8 +4,14 @@ module Data.Vector.Persistent
     length,
     indexMaybe,
     index,
+    (!?),
+    (!),
+    update,
+    snoc,
+    singleton,
+    null,
   )
 where
 
 import Data.Vector.Persistent.Internal
-import Prelude hiding (length)
+import Prelude hiding (length, null)
