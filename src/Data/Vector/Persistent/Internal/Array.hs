@@ -9,6 +9,7 @@ module Data.Vector.Persistent.Internal.Array where
 
 import Control.Monad.Primitive (PrimMonad (PrimState))
 import Data.Primitive.SmallArray
+import Prelude hiding (length)
 
 type Array = SmallArray
 
@@ -43,12 +44,31 @@ shrink :: _ => _
 shrink = shrinkSmallMutableArray
 {-# INLINE shrink #-}
 
+copy :: _ => _
+copy = copySmallArray
+{-# INLINE copy #-}
+
+null :: SmallArray a -> Bool
+null arr = length arr == 0
+{-# INLINE null #-}
+
+last :: SmallArray a -> a
+last arr = index arr $ length arr
+
 singleton :: a -> Array a
 singleton a = runSmallArray $ newSmallArray 1 a
 {-# INLINE singleton #-}
 
 empty = emptySmallArray
 {-# INLINE empty #-}
+
+map :: (a -> b) -> SmallArray a -> SmallArray b
+map = fmap
+{-# INLINE map #-}
+
+map' :: (a -> b) -> SmallArray a -> SmallArray b
+map' = mapSmallArray'
+{-# INLINE map' #-}
 
 update :: Array a -> Int -> a -> Array a
 update arr i a = runSmallArray $ do
@@ -74,7 +94,7 @@ updateResize arr i a = createSmallArray (max len (i + 1)) undefinedElem $ \marr 
 {-# INLINE updateResize #-}
 
 pop :: Array a -> Array a
-pop arr = runSmallArray $ thawSmallArray arr 0 (sizeofSmallArray arr - 1)
+pop arr = runSmallArray $ thawSmallArray arr 0 (length arr - 1)
 {-# INLINE pop #-}
 
 index = indexSmallArray

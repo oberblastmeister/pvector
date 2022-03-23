@@ -57,7 +57,7 @@ data Vector a = RootNode
     init :: !(Array (Node a)),
     tail :: !(Array a)
   }
-  deriving (Data, Typeable, Generic)
+  deriving (Show, Data, Typeable, Generic)
 
 instance Eq a => Eq (Vector a) where
   (==) = persistentVectorEq
@@ -85,19 +85,17 @@ instance Traversable Vector where
   traverse = Data.Vector.Persistent.Internal.traverse
 
 instance Semigroup (Vector a) where
-  (<>) = foldl' snoc
+  (<>) = (><)
   {-# INLINE (<>) #-}
 
 instance Monoid (Vector a) where
-  mappend = (<>)
-  {-# INLINE mappend #-}
   mempty = empty
   {-# INLINE mempty #-}
 
 data Node a
   = InternalNode {getInternalNode :: !(Array (Node a))}
   | DataNode {getDataNode :: !(Array a)}
-  deriving (Data, Typeable, Generic)
+  deriving (Show, Data, Typeable, Generic)
 
 instance Eq a => Eq (Node a) where
   (==) = nodeEq
@@ -277,11 +275,12 @@ snocArr vec@RootNode {size, shift, tail} addedSize arr
       RootNode
         { size = size + addedSize,
           shift,
-          init = pushTail size tail shift $ init vec,
+          init = snocTail size tail shift $ init vec,
           tail = arr
         }
 {-# INLINE snocArr #-}
 
+-- This is unsafe because it shrinks the tail in place
 -- Shrinks the tail to the amount required by the size
 -- This gets rid of any undefined elements
 unsafeShrink :: Vector a -> Vector a
@@ -298,8 +297,8 @@ unsafeShrink vec@RootNode {size, tail}
       pure vec {tail = arr}
 {-# INLINE unsafeShrink #-}
 
-pushTail :: Int -> Array a -> Int -> Array (Node a) -> Array (Node a)
-pushTail size tail = go
+snocTail :: Int -> Array a -> Int -> Array (Node a) -> Array (Node a)
+snocTail size tail = go
   where
     go !level !parent = Array.updateResize parent subIx toInsert
       where
@@ -309,9 +308,8 @@ pushTail size tail = go
               let vec' = Array.index parent subIx
                in InternalNode $ go (level - keyBits) (getInternalNode vec')
           | otherwise = newPath (level - keyBits) tail
-
         subIx = ((size - 1) .>>. level) .&. keyMask
-{-# INLINE pushTail #-}
+{-# INLINE snocTail #-}
 
 newPath :: Int -> Array a -> Node a
 newPath 0 tail = DataNode tail
@@ -343,14 +341,14 @@ indexMaybe vec ix
   | otherwise = Nothing
 {-# INLINE indexMaybe #-}
 
-index :: Vector a -> Int -> a
+index :: HasCallStack => Vector a -> Int -> a
 index vec ix
   | ix < 0 = moduleError "index" $ "negative index: " ++ show ix
   | ix >= length vec = moduleError "index" $ "index too large: " ++ show ix
   | otherwise = unsafeIndex vec ix
 {-# INLINE index #-}
 
-(!) :: Vector a -> Int -> a
+(!) :: HasCallStack => Vector a -> Int -> a
 (!) = index
 {-# INLINE (!) #-}
 
@@ -394,9 +392,44 @@ update vec@RootNode {size, shift, tail} ix a
         let !node = go (level - keyBits) (getInternalNode vec') =
           Array.update vec ix' $! InternalNode node
       where
-        ix' = (ix .>>. level) .&. keyBits
+        ix' = (ix .>>. level) .&. keyMask
         vec' = Array.index vec ix'
 {-# INLINE update #-}
+
+unsnoc :: Vector a -> Maybe (Vector a, a)
+unsnoc vec@RootNode {size, tail, init, shift}
+  | size == 0 = Nothing
+  | subIx >= tailOffset vec =
+      Just
+        ( vec {size = size - 1, tail = Array.pop tail},
+          Array.index tail (subIx .&. keyMask)
+        )
+  | otherwise = do
+      let (init', tail') = unsnocTail size shift init
+      Just
+        ( vec {tail = Array.pop tail', init = init'},
+          Array.last tail'
+        )
+  where
+    subIx = size - 1
+{-# INLINE unsnoc #-}
+
+unsnocTail :: Int -> Int -> Array (Node a) -> (Array (Node a), Array a)
+unsnocTail size = go
+  where
+    go :: Int -> Array (Node a) -> (Array (Node a), Array a)
+    go !level !parent = (Array.update parent subIx $ InternalNode toInsert, tail)
+      where
+        (toInsert, tail)
+          | level == keyBits = (Array.pop parent, getDataNode child)
+          | otherwise = do
+              let (child', tail) = go (level - keyBits) (getInternalNode child)
+              if Array.null child'
+                then (Array.pop parent, tail)
+                else (Array.update parent subIx $ InternalNode child', tail)
+        child = Array.index parent subIx
+        subIx = ((size - 1) .>>. level) .&. keyMask
+{-# INLINE unsnocTail #-}
 
 -- unsnoc :: Vector a -> Maybe (a, Vector a)
 -- unsnoc vec@RootNode {size, shift, tail}
@@ -422,6 +455,7 @@ update vec@RootNode {size, shift, tail} ix a
 --         ix' = (ix .>>. level) .&. keyBits
 --         vec' = Array.index vec ix'
 --     ix = size - 1
+--     ix = size - 1
 
 -- | The index of the first element of the tail of the vector (that is, the
 -- *last* element of the list representing the tail). This is also the number
@@ -429,7 +463,7 @@ update vec@RootNode {size, shift, tail} ix a
 --
 -- Caution: Only gives a sensible result if the vector is nonempty.
 tailOffset :: Vector a -> Int
-tailOffset v = (length v - 1) .&. ((-1) .<<. keyBits)
+tailOffset vec = (length vec - 1) .&. ((-1) .<<. keyBits)
 {-# INLINE tailOffset #-}
 
 -- | \( O(1) \) Get the length of the vector.
@@ -448,6 +482,9 @@ fromList :: [a] -> Vector a
 fromList xs = unsafeShrink $ Foldable.foldl' unsafeSnoc emptyMaxTail xs
 {-# INLINE fromList #-}
 
+fromListNaive :: [a] -> Vector a
+fromListNaive = Foldable.foldl' snoc empty
+
 reverse :: Vector a -> Vector a
 reverse vec = unsafeShrink $ foldr' (flip unsafeSnoc) emptyMaxTail vec
 {-# INLINE reverse #-}
@@ -457,10 +494,9 @@ filter f vec = foldl' (\vec x -> if f x then unsafeSnoc vec x else vec) emptyMax
 {-# INLINE filter #-}
 
 partition :: (a -> Bool) -> Vector a -> (Vector a, Vector a)
-partition f vec = case twoVec of
-  TwoVec vec1 vec2 -> (unsafeShrink vec1, unsafeShrink vec2)
+partition f vec = (unsafeShrink vec1, unsafeShrink vec2)
   where
-    twoVec = foldl' go (TwoVec emptyMaxTail emptyMaxTail) vec
+    (TwoVec vec1 vec2) = foldl' go (TwoVec emptyMaxTail emptyMaxTail) vec
     go (TwoVec vec1 vec2) x =
       if f x
         then TwoVec (unsafeSnoc vec1 x) vec2
@@ -492,6 +528,16 @@ traverse f vec@RootNode {init, tail} =
     go (DataNode as) = DataNode <$> Traversable.traverse f as
     go (InternalNode ns) = InternalNode <$> Traversable.traverse go ns
 {-# INLINE traverse #-}
+
+-- Note: we fully apply foldl' to get everything to unbox.
+(//) :: Show a => Vector a -> [(Int, a)] -> Vector a
+(//) vec = Foldable.foldl' go vec
+  where
+    go v (ix, a) = update v ix a
+
+(><) :: Vector a -> Vector a -> Vector a
+(><) = foldl' snoc
+{-# INLINE (><) #-}
 
 #ifdef INSPECTION
 

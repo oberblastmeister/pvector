@@ -1,12 +1,14 @@
+{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 
 module PersistentVectorSpec (spec) where
 
 import Data.Vector.Persistent (Vector)
-import qualified Data.Vector.Persistent as Vector
+import qualified Data.Vector.Persistent.Internal as Vector
 import Data.Vector.Persistent.Internal.Array (Array)
 import qualified Data.Vector.Persistent.Internal.Array as Array
+import Debug.Trace (trace)
 import GHC.Exts (fromList, toList)
 import Test.Hspec
 import Test.Hspec.QuickCheck
@@ -59,3 +61,24 @@ spec = parallel $ do
 
   prop "mappend" $ \(l :: [Int]) (l' :: [Int]) ->
     l <> l' == toList (fromList @(Vector _) l <> fromList @(Vector _) l')
+
+-- prop "unsnoc" $ \(l :: [Int]) (i :: Int) -> do
+--   let l' =
+--         ( foldl'
+--             ( \l _ -> case l of
+--                 [] -> []
+--                 _ : xs -> xs
+--             )
+--             l
+--             [0 .. i]
+--         )
+--       vec = fromList @(Vector _) l
+--       vec' =
+--         foldl'
+--           ( \vec _ -> case Vector.unsnoc vec of
+--               Nothing -> Vector.empty
+--               Just (vec, _) -> vec
+--           )
+--           vec
+--           [0 .. i]
+--   l' == toList vec'

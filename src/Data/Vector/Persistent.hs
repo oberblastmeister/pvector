@@ -1,5 +1,9 @@
 module Data.Vector.Persistent
-  ( Vector,
+  ( foldr,
+    foldr',
+    foldl,
+    foldl',
+    Vector,
     empty,
     length,
     indexMaybe,
@@ -7,11 +11,31 @@ module Data.Vector.Persistent
     (!?),
     (!),
     update,
+    modify,
     snoc,
     singleton,
     null,
+    (//),
+    (><),
+    map,
+    traverse,
+    toList,
+    fromList,
+    reverse,
+    partition,
+    filter,
+    unsnoc,
   )
 where
 
 import Data.Vector.Persistent.Internal
-import Prelude hiding (length, null)
+import Prelude hiding
+  ( filter,
+    foldl,
+    foldr,
+    length,
+    map,
+    null,
+    reverse,
+    traverse,
+  )
