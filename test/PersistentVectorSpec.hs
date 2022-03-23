@@ -4,6 +4,7 @@
 
 module PersistentVectorSpec (spec) where
 
+import Data.Foldable (foldl')
 import Data.Vector.Persistent (Vector)
 import qualified Data.Vector.Persistent.Internal as Vector
 import Data.Vector.Persistent.Internal.Array (Array)
@@ -62,23 +63,36 @@ spec = parallel $ do
   prop "mappend" $ \(l :: [Int]) (l' :: [Int]) ->
     l <> l' == toList (fromList @(Vector _) l <> fromList @(Vector _) l')
 
--- prop "unsnoc" $ \(l :: [Int]) (i :: Int) -> do
---   let l' =
---         ( foldl'
---             ( \l _ -> case l of
---                 [] -> []
---                 _ : xs -> xs
---             )
---             l
---             [0 .. i]
---         )
---       vec = fromList @(Vector _) l
---       vec' =
---         foldl'
---           ( \vec _ -> case Vector.unsnoc vec of
---               Nothing -> Vector.empty
---               Just (vec, _) -> vec
---           )
---           vec
---           [0 .. i]
---   l' == toList vec'
+  it "unsnoc bad" $ do
+    unsnocProp (replicate 65 0) 1 `shouldBe` True
+
+  -- unsnocProp [-16, -30, 24, 23, -1, 28, 5, 0, -10, -19, 16, 2, 21, 7, -27, -5, 27, 2, -27, -11, -4, -32, 11, -11, 32, -21, -19, -11, 28, 23, 25, -25, 7] 9
+  --   `shouldBe` True
+
+  prop "unsnoc" unsnocProp
+
+unsnocProp :: [Int] -> Int -> Bool
+unsnocProp l i = do
+  let
+      -- !_ = trace ("i " ++ show i) ()
+      -- !_ = trace ("l " ++ show l) ()
+      l' = reverse $ drop i $ reverse l
+      -- !_ = trace ("l'" ++ show l') ()
+      vec = fromList @(Vector _) l
+      -- !_ = trace ("vec" ++ show vec) ()
+      vec' =
+        foldl'
+          ( \vec _ -> case Vector.unsnoc vec of
+              Nothing -> Vector.empty
+              Just (vec, _) -> vec
+          )
+          vec
+          [1 .. i]
+      -- vec' = unsnoc' $ unsnoc' vec
+      !_ = trace ("vec' " ++ show vec') ()
+  l' == toList vec'
+
+unsnoc' :: Show a => Vector a -> Vector a
+unsnoc' vec = case Vector.unsnoc vec of
+  Just (vec, _) -> vec
+  _ -> error "empty vector"

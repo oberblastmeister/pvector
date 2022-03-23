@@ -24,6 +24,9 @@ new = newSmallArray
 create = createSmallArray
 {-# INLINE create #-}
 
+create_ i = create i undefinedElem
+{-# INLINE create_ #-}
+
 write :: _ => _
 write = writeSmallArray
 {-# INLINE write #-}
@@ -94,7 +97,7 @@ updateResize arr i a = createSmallArray (max len (i + 1)) undefinedElem $ \marr 
 {-# INLINE updateResize #-}
 
 pop :: Array a -> Array a
-pop arr = runSmallArray $ thawSmallArray arr 0 (length arr - 1)
+pop arr = create_ (length arr - 1) $ \marr -> copy marr 0 arr 0 (length arr - 1)
 {-# INLINE pop #-}
 
 index = indexSmallArray

@@ -7,11 +7,13 @@
 {-# LANGUAGE MagicHash #-}
 {-# LANGUAGE MultiWayIf #-}
 {-# LANGUAGE NamedFieldPuns #-}
+{-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE RoleAnnotations #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UnboxedTuples #-}
+{-# LANGUAGE ViewPatterns #-}
 
 #ifdef INSPECTION
 {-# LANGUAGE TemplateHaskell #-}
@@ -34,6 +36,7 @@ import Data.Primitive.SmallArray
 import qualified Data.Traversable as Traversable
 import Data.Vector.Persistent.Internal.Array (Array)
 import qualified Data.Vector.Persistent.Internal.Array as Array
+import Debug.Trace (trace)
 import GHC.Exts (IsList (..))
 import GHC.Generics (Generic)
 import GHC.Stack (HasCallStack)
@@ -50,6 +53,8 @@ keyMask = nodeWidth - 1
 
 type role Vector nominal
 
+-- invariant: the only time tail can be empty is when init is empty
+-- or else tailOffset will give the wrong value
 data Vector a = RootNode
   { size :: !Int,
     -- 1 << shift is the maximum that each child can contain
@@ -211,6 +216,20 @@ infixl 8 .<<., .>>.
 (|>) :: Vector a -> a -> Vector a
 (|>) = snoc
 {-# INLINE (|>) #-}
+
+pattern (:|>) :: Vector a -> a -> Vector a
+pattern vec :|> x <-
+  (unsnoc -> Just (vec, x))
+  where
+    vec :|> x = vec `snoc` x
+
+infixl 5 :|>
+
+pattern Empty :: Vector a
+pattern Empty <-
+  (null -> True)
+  where
+    Empty = empty
 
 -- | \( O(1) \) Append an element to the end of the vector.
 snoc :: Vector a -> a -> Vector a
@@ -399,63 +418,44 @@ update vec@RootNode {size, shift, tail} ix a
 unsnoc :: Vector a -> Maybe (Vector a, a)
 unsnoc vec@RootNode {size, tail, init, shift}
   | size == 0 = Nothing
-  | subIx >= tailOffset vec =
-      Just
-        ( vec {size = size - 1, tail = Array.pop tail},
-          Array.index tail (subIx .&. keyMask)
-        )
+  -- we need to have this case because we can't run unsnocTail, there is nothing left in the tail
+  | size == 1 = Just (empty, Array.index tail 0)
   | otherwise = do
-      let (init', tail') = unsnocTail size shift init
-      Just
-        ( vec {tail = Array.pop tail', init = init'},
-          Array.last tail'
-        )
-  where
-    subIx = size - 1
+      let a = Array.last tail
+          tail' = Array.pop tail
+      if Array.null tail'
+        then do
+          -- let !_ = trace ("tail is null") ()
+          -- let !_ = trace ("init " ++ show init) ()
+          let (# init', tail' #) = unsnocTail# size shift init
+          -- let !_ = trace ("init' " ++ show init') ()
+          -- let !_ = trace ("tail' " ++ show tail') ()
+          Just
+            ( vec {size = size - 1, init = init', tail = tail'},
+              a
+            )
+        else do
+          let !_ = trace ("unsnocing from tail") ()
+          Just
+            ( vec {size = size - 1, tail = tail'},
+              a
+            )
 {-# INLINE unsnoc #-}
 
-unsnocTail :: Int -> Int -> Array (Node a) -> (Array (Node a), Array a)
-unsnocTail size = go
+unsnocTail# :: Int -> Int -> Array (Node a) -> (# Array (Node a), Array a #)
+unsnocTail# size = go
   where
-    go :: Int -> Array (Node a) -> (Array (Node a), Array a)
-    go !level !parent = (Array.update parent subIx $ InternalNode toInsert, tail)
+    go !level !parent
+      | level == keyBits = (# Array.pop parent, getDataNode child #)
+      | otherwise = do
+          let (# child', tail #) = go (level - keyBits) (getInternalNode child)
+          if Array.null child'
+            then (# Array.pop parent, tail #)
+            else (# Array.update parent subIx $ InternalNode child', tail #)
       where
-        (toInsert, tail)
-          | level == keyBits = (Array.pop parent, getDataNode child)
-          | otherwise = do
-              let (child', tail) = go (level - keyBits) (getInternalNode child)
-              if Array.null child'
-                then (Array.pop parent, tail)
-                else (Array.update parent subIx $ InternalNode child', tail)
         child = Array.index parent subIx
-        subIx = ((size - 1) .>>. level) .&. keyMask
-{-# INLINE unsnocTail #-}
-
--- unsnoc :: Vector a -> Maybe (a, Vector a)
--- unsnoc vec@RootNode {size, shift, tail}
---   | size == 0 = Nothing
---   | ix >= tailOffset vec =
---       Just
---         ( Array.index tail (ix .&. keyMask),
---           vec
---             { size = size - 1,
---               tail = Array.update tail (ix .&. keyMask) Array.undefinedElem
---             }
---         )
---   | otherwise = undefined
---   where
---     go level vec
---       | level == keyBits,
---         let !node = DataNode $ Array.update (getDataNode vec') (ix .&. keyMask) Array.undefinedElem =
---           Array.update vec ix' node
---       | otherwise,
---         let !node = go (level - keyBits) (getInternalNode vec') =
---           Array.update vec ix' $! InternalNode node
---       where
---         ix' = (ix .>>. level) .&. keyBits
---         vec' = Array.index vec ix'
---     ix = size - 1
---     ix = size - 1
+        subIx = ((size - 2) .>>. level) .&. keyMask
+{-# INLINE unsnocTail# #-}
 
 -- | The index of the first element of the tail of the vector (that is, the
 -- *last* element of the list representing the tail). This is also the number
@@ -530,7 +530,7 @@ traverse f vec@RootNode {init, tail} =
 {-# INLINE traverse #-}
 
 -- Note: we fully apply foldl' to get everything to unbox.
-(//) :: Show a => Vector a -> [(Int, a)] -> Vector a
+(//) :: Vector a -> [(Int, a)] -> Vector a
 (//) vec = Foldable.foldl' go vec
   where
     go v (ix, a) = update v ix a
@@ -538,6 +538,10 @@ traverse f vec@RootNode {init, tail} =
 (><) :: Vector a -> Vector a -> Vector a
 (><) = foldl' snoc
 {-# INLINE (><) #-}
+
+-- | Check the invariant of the vector
+invariant :: Vector a -> Bool
+invariant vec = True
 
 #ifdef INSPECTION
 
