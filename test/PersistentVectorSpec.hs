@@ -17,6 +17,18 @@ import Test.QuickCheck ((==>))
 
 spec :: Spec
 spec = parallel $ do
+  prop "toList fromList iterate" toListFromListIterateProp
+
+  it "toList fromList iterate weird" $ toListFromListIterateProp [1 .. 3]
+  
+  describe "shared" $ do
+    prop "toList fromList" toListFromListIterateSharedProp
+
+  xdescribe "stream" $ do
+    prop "toList fromList" toListFromListStream
+
+    it "toList fromList weird" $ toListFromListStream [1 .. 84]
+
   prop "toList fromList identity" $ \(l :: [Int]) ->
     l == toList (fromList @(Vector _) l)
 
@@ -41,21 +53,12 @@ spec = parallel $ do
     let go a = ([a], a)
     fmap toList (traverse go (fromList @(Vector _) l)) == traverse go l
 
-  prop "index" $ \(ix :: Int) (l :: [Int]) -> do
-    let indexMaybeList :: [a] -> Int -> Maybe a
-        indexMaybeList xs n
-          | n < 0 = Nothing
-          -- Definition adapted from GHC.List
-          | otherwise =
-              foldr
-                ( \x r k -> case k of
-                    0 -> Just x
-                    _ -> r (k - 1)
-                )
-                (const Nothing)
-                xs
-                n
-    indexMaybeList l ix == Vector.indexMaybe (fromList @(Vector _) l) ix
+  prop "index" indexProp
+
+  it "index weierd" $ indexProp 9 [1 :: Int .. 15]
+
+  prop "eq self" $ \(l :: [Int]) ->
+    (fromList @(Vector _) l) == fromList l
 
   prop "eq" $ \(l :: [Int]) (l' :: [Int]) ->
     (l == l') == (fromList @(Vector _) l == fromList @(Vector _) l')
@@ -66,20 +69,26 @@ spec = parallel $ do
   it "unsnoc bad" $ do
     unsnocProp (replicate 65 0) 1 `shouldBe` True
 
-  -- unsnocProp [-16, -30, 24, 23, -1, 28, 5, 0, -10, -19, 16, 2, 21, 7, -27, -5, 27, 2, -27, -11, -4, -32, 11, -11, 32, -21, -19, -11, 28, 23, 25, -25, 7] 9
-  --   `shouldBe` True
-
   prop "unsnoc" unsnocProp
+
+  prop "snoc unsnoc" snocUnsnocProp
+
+snocUnsnocProp :: Int -> Bool
+snocUnsnocProp times = do
+  Vector.null
+    . unsnocTimes
+    . snocTimes
+    . unsnocTimes
+    . snocTimes
+    $ Vector.empty
+  where
+    snocTimes vec = foldl' Vector.snoc vec [1 .. times]
+    unsnocTimes vec = foldl' (\vec _ -> unsnoc' vec) vec [1 .. times]
 
 unsnocProp :: [Int] -> Int -> Bool
 unsnocProp l i = do
-  let
-      -- !_ = trace ("i " ++ show i) ()
-      -- !_ = trace ("l " ++ show l) ()
-      l' = reverse $ drop i $ reverse l
-      -- !_ = trace ("l'" ++ show l') ()
+  let l' = reverse $ drop i $ reverse l
       vec = fromList @(Vector _) l
-      -- !_ = trace ("vec" ++ show vec) ()
       vec' =
         foldl'
           ( \vec _ -> case Vector.unsnoc vec of
@@ -88,11 +97,45 @@ unsnocProp l i = do
           )
           vec
           [1 .. i]
-      -- vec' = unsnoc' $ unsnoc' vec
-      !_ = trace ("vec' " ++ show vec') ()
   l' == toList vec'
 
-unsnoc' :: Show a => Vector a -> Vector a
+unsnoc' :: Vector a -> Vector a
 unsnoc' vec = case Vector.unsnoc vec of
   Just (vec, _) -> vec
   _ -> error "empty vector"
+
+toListFromListIterateProp :: [Int] -> Bool
+toListFromListIterateProp l = do
+  let !_ = trace ("l: " ++ show l) ()
+  l == toList (Vector.fromListIterate l)
+
+toListFromListIterateSharedProp :: [Int] -> Bool
+toListFromListIterateSharedProp l = do
+  let !_ = trace ("l: " ++ show l) ()
+  l == toList (Vector.fromListIterateShared l)
+
+toListFromListStream :: [Int] -> Bool
+toListFromListStream l = do
+  let !_ = trace ("l: " ++ show l) ()
+  l == toList (Vector.fromListStream l)
+
+indexProp :: Int -> [Int] -> Bool
+indexProp ix l = do
+  let indexMaybeList :: [a] -> Int -> Maybe a
+      indexMaybeList xs n
+        | n < 0 = Nothing
+        -- Definition adapted from GHC.List
+        | otherwise =
+            foldr
+              ( \x r k -> case k of
+                  0 -> Just x
+                  _ -> r (k - 1)
+              )
+              (const Nothing)
+              xs
+              n
+      vec = fromList @(Vector _) l
+  -- !_ = trace ("ix: " ++ show ix) ()
+  -- !_ = trace ("l: " ++ show l) ()
+  -- !_ = trace ("vec: " ++ show vec) ()
+  indexMaybeList l ix == Vector.indexMaybe (vec) ix

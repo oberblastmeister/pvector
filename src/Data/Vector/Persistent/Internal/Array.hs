@@ -62,6 +62,9 @@ singleton :: a -> Array a
 singleton a = runSmallArray $ newSmallArray 1 a
 {-# INLINE singleton #-}
 
+clone = cloneSmallArray
+{-# INLINE clone #-}
+
 empty = emptySmallArray
 {-# INLINE empty #-}
 

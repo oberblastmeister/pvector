@@ -1,49 +1,41 @@
-{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE CPP #-}
-{-# LANGUAGE DeriveDataTypeable #-}
-{-# LANGUAGE DeriveGeneric #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE MagicHash #-}
-{-# LANGUAGE MultiWayIf #-}
-{-# LANGUAGE NamedFieldPuns #-}
-{-# LANGUAGE PatternSynonyms #-}
-{-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE PartialTypeSignatures #-}
 {-# LANGUAGE RoleAnnotations #-}
-{-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UnboxedTuples #-}
-{-# LANGUAGE ViewPatterns #-}
 
-#ifdef INSPECTION
-{-# LANGUAGE TemplateHaskell #-}
-#endif
+module Data.Vector.Persistent.Internal where
 
-module Data.Vector.Persistent.Internal
-  ( module Data.Vector.Persistent.Internal,
-  )
-where
-
-#ifdef INSPECTION
-import Test.Inspection
-#endif
-
+import Control.DeepSeq (NFData (rnf))
+import Control.Monad.Primitive (PrimMonad (PrimState))
 import Control.Monad.ST (runST)
 import Data.Bits (Bits, unsafeShiftL, unsafeShiftR, (.&.))
 import Data.Data
 import qualified Data.Foldable as Foldable
 import Data.Primitive.SmallArray
 import qualified Data.Traversable as Traversable
+import Data.Vector.Fusion.Stream.Monadic (Step (..), Stream (..))
+import qualified Data.Vector.Fusion.Stream.Monadic as Stream
 import Data.Vector.Persistent.Internal.Array (Array)
 import qualified Data.Vector.Persistent.Internal.Array as Array
-import Debug.Trace (trace)
+import qualified Data.Vector.Persistent.Internal.Buffer.Large as Buffer.Large
+import qualified Data.Vector.Persistent.Internal.Buffer.Small as Buffer.Small
+import Data.Vector.Persistent.Internal.Bundle (Bundle, MBundle (..))
+import qualified Data.Vector.Persistent.Internal.Bundle as Bundle
 import GHC.Exts (IsList (..))
 import GHC.Generics (Generic)
 import GHC.Stack (HasCallStack)
-import Prelude hiding (init, length, null, tail)
+import Prelude hiding (init, length, map, null, tail)
+
+#ifdef INSPECTION
+{-# LANGUAGE TemplateHaskell #-}
+import Test.Inspection
+#endif
+
+#include "vector.h"
 
 keyBits :: Int
-keyBits = 5
+keyBits = 4
 
 nodeWidth :: Int
 nodeWidth = 1 .<<. keyBits
@@ -97,6 +89,19 @@ instance Monoid (Vector a) where
   mempty = empty
   {-# INLINE mempty #-}
 
+instance NFData a => NFData (Vector a) where
+  rnf RootNode {init, tail} = rnf init `seq` rnf tail
+  {-# INLINE rnf #-}
+
+-- instance MonadFail Vector where
+--   fail _ = empty
+--   {-# INLINE fail #-}
+
+instance NFData a => NFData (Node a) where
+  rnf (DataNode as) = rnf as
+  rnf (InternalNode ns) = rnf ns
+  {-# INLINE rnf #-}
+
 data Node a
   = InternalNode {getInternalNode :: !(Array (Node a))}
   | DataNode {getDataNode :: !(Array a)}
@@ -110,7 +115,7 @@ instance Ord a => Ord (Node a) where
   compare = nodeCompare
   {-# INLINE compare #-}
 
-instance IsList (Vector a) where
+instance Show a => IsList (Vector a) where
   type Item (Vector a) = a
   fromList = Data.Vector.Persistent.Internal.fromList
   toList = Data.Vector.Persistent.Internal.toList
@@ -163,6 +168,11 @@ nodeEq (InternalNode ns) (InternalNode ns') = ns == ns'
 nodeEq (DataNode as) (DataNode as') = as == as'
 nodeEq _ _ = False
 {-# INLINE nodeEq #-}
+
+nodeLen :: Node a -> Int
+nodeLen (InternalNode arr) = Array.length arr
+nodeLen (DataNode arr) = Array.length arr
+{-# INLINE nodeLen #-}
 
 persistentVectorCompare :: Ord a => Vector a -> Vector a -> Ordering
 persistentVectorCompare
@@ -417,9 +427,9 @@ update vec@RootNode {size, shift, tail} ix a
 
 unsnoc :: Vector a -> Maybe (Vector a, a)
 unsnoc vec@RootNode {size, tail, init, shift}
-  | size == 0 = Nothing
+  | 0 <- size = Nothing
   -- we need to have this case because we can't run unsnocTail, there is nothing left in the tail
-  | size == 1 = Just (empty, Array.index tail 0)
+  | 1 <- size = Just (empty, Array.index tail 0)
   | otherwise = do
       let a = Array.last tail
           tail' = Array.pop tail
@@ -435,7 +445,6 @@ unsnoc vec@RootNode {size, tail, init, shift}
               a
             )
         else do
-          let !_ = trace ("unsnocing from tail") ()
           Just
             ( vec {size = size - 1, tail = tail'},
               a
@@ -454,6 +463,8 @@ unsnocTail# size = go
             else (# Array.update parent subIx $ InternalNode child', tail #)
       where
         child = Array.index parent subIx
+        -- we need to subtract 2 because the first subtraction gets us to the tail element
+        -- the second subtraction gets to the last element in the tree
         subIx = ((size - 2) .>>. level) .&. keyMask
 {-# INLINE unsnocTail# #-}
 
@@ -478,9 +489,12 @@ moduleError :: forall a. HasCallStack => String -> String -> a
 moduleError fun msg = error ("Data.Vector.Persistent.Internal" ++ fun ++ ':' : ' ' : msg)
 {-# NOINLINE moduleError #-}
 
-fromList :: [a] -> Vector a
-fromList xs = unsafeShrink $ Foldable.foldl' unsafeSnoc emptyMaxTail xs
+fromList :: Show a => [a] -> Vector a
+fromList = fromListNaive
 {-# INLINE fromList #-}
+
+fromListStream :: Show a => [a] -> Vector a
+fromListStream = unstream . Bundle.fromList
 
 fromListNaive :: [a] -> Vector a
 fromListNaive = Foldable.foldl' snoc empty
@@ -541,7 +555,362 @@ traverse f vec@RootNode {init, tail} =
 
 -- | Check the invariant of the vector
 invariant :: Vector a -> Bool
-invariant vec = True
+invariant _vec = True
+
+type FromVectorState a = Either Int [Crumb a]
+
+type Crumb a = (Node a, Int)
+
+{-# INLINE_FUSED stream #-}
+stream :: forall m a. Monad m => Vector a -> Stream m a
+stream RootNode {init, tail} = Stream step $ Right [(InternalNode init, 0)]
+  where
+    {-# INLINE_INNER step #-}
+    step :: FromVectorState a -> m (Step (FromVectorState a) a)
+    step (Right ((node, ix) : crumbs)) = case node of
+      DataNode xs ->
+        if ix == Array.length xs
+          then pure $ Skip $ Right crumbs
+          else do
+            let (# x #) = Array.index# xs ix
+            pure $ Yield x $ Right crumbs
+      InternalNode ns ->
+        if ix == Array.length ns
+          then pure $ Skip $ Right crumbs
+          else do
+            let (# node' #) = Array.index# ns ix
+                !ix' = ix + 1
+            pure $ Skip $ Right ((node', 0) : (node, ix') : crumbs)
+    step (Right []) = pure $ Skip $ Left 0
+    step (Left ix)
+      | ix == Array.length tail = pure Done
+      | otherwise = do
+          let (# x #) = Array.index# tail ix
+          pure $! Yield x $! Left $! ix + 1
+
+{-# INLINE_FUSED streamR #-}
+streamR :: forall m a. Monad m => Vector a -> Stream m a
+streamR RootNode {init, tail} = Stream step $ Left tailLen
+  where
+    !tailLen = Array.length tail
+
+    {-# INLINE_INNER step #-}
+    step :: FromVectorState a -> m (Step (FromVectorState a) a)
+    step (Right ((node, ixAbove) : crumbs)) = case node of
+      DataNode xs ->
+        if ix == -1
+          then pure $ Skip $ Right crumbs
+          else do
+            let (# x #) = Array.index# xs ix
+            pure $ Yield x $ Right crumbs
+      InternalNode ns ->
+        if ix == -1
+          then pure $ Skip $ Right crumbs
+          else do
+            let (# node' #) = Array.index# ns ix
+                !start = nodeLen node'
+            pure $ Skip $ Right ((node', start) : (node, ix) : crumbs)
+      where
+        !ix = ixAbove - 1
+    step (Right []) = pure Done
+    step (Left ixAbove)
+      | ix == -1 =
+          let !initLen = Array.length init
+           in pure $ Skip $ Right [(InternalNode init, initLen)]
+      | otherwise = do
+          let (# x #) = Array.index# tail ix
+          pure $ Yield x $ Left ix
+      where
+        !ix = ixAbove - 1
+
+unstream :: Bundle a -> (Vector a)
+unstream bundle = runST $ munstream $ Bundle.lift bundle
+{-# INLINE unstream #-}
+
+fromListIterate :: [a] -> Vector a
+fromListIterate [] = empty
+fromListIterate [x] = singleton x
+fromListIterate ls = case nodesTail DataNode ls of
+  (size, tail, [tree]) -> do
+    -- let !_ = trace ("tree first: " ++ show tree) ()
+    -- let !_ = trace ("tail first: " ++ show tail) ()
+    RootNode {size, shift = keyBits, tail, init = pure tree}
+  (size, tail, ls') -> do
+    let iterateNodes !shift trees = case nodes InternalNode trees of
+          [tree] -> do
+            -- let !_ = trace ("tree: " ++ show tree) ()
+            RootNode {size, shift, tail, init = getInternalNode tree}
+          trees' -> iterateNodes (shift + keyBits) trees'
+    iterateNodes keyBits ls'
+  where
+    nodesTail f trees = runST $ do
+      buffer <- Buffer.Small.newWithCapacity nodeWidth
+      let -- loop i _buffer ts | trace ("loop: " ++ show i ++ " " ++ show ts) False = undefined
+          loop !i !buffer [] = do
+            tail <- Buffer.Small.freeze buffer
+            pure (i, tail, [])
+          loop i buffer (t : ts) = do
+            if Buffer.Small.length buffer == nodeWidth
+              then do
+                -- let !_ = trace ("freezing buffer") ()
+                result <- Buffer.Small.freeze buffer
+                buffer' <- Buffer.Small.push t $ Buffer.Small.clear buffer
+                (i, tail, rest) <- loop (i + 1) buffer' ts
+                let !x = f result
+                pure (i, tail, x : rest)
+              else do
+                buffer' <- Buffer.Small.push t buffer
+                -- frozen <- Buffer.Small.freeze buffer'
+                -- let !_ = trace ("buffer': " ++ show frozen) ()
+                loop (i + 1) buffer' ts
+      loop (0 :: Int) buffer trees
+    {-# INLINE nodesTail #-}
+
+    nodes f trees = runST $ do
+      buffer <- Buffer.Small.newWithCapacity nodeWidth
+      let loop !buffer [] = do
+            result <- Buffer.Small.freeze buffer
+            let !x = f result
+            pure [x]
+          loop buffer (t : ts) = do
+            if Buffer.Small.length buffer == nodeWidth
+              then do
+                result <- Buffer.Small.freeze buffer
+                buffer' <- Buffer.Small.push t $ Buffer.Small.clear buffer
+                rest <- loop buffer' ts
+                let !x = f result
+                pure (x : rest)
+              else do
+                buffer' <- Buffer.Small.push t buffer
+                loop buffer' ts
+      loop buffer trees
+    {-# INLINE nodes #-}
+{-# INLINE fromListIterate #-}
+
+data SnocList a = Snoc (SnocList a) a | Nil
+
+fromListIterateShared :: [a] -> Vector a
+fromListIterateShared [] = empty
+fromListIterateShared [x] = singleton x
+fromListIterateShared ls = runST $ do
+  buffer <- Buffer.Small.newWithCapacity nodeWidth
+  let nodesTail f trees = do
+        let -- loop i _buffer ts | trace ("loop: " ++ show i ++ " " ++ show ts) False = undefined
+            loop !i !buffer [] = do
+              tail <- Buffer.Small.freeze buffer
+              pure (i, tail, [])
+            loop i buffer (t : ts) = do
+              if Buffer.Small.length buffer == nodeWidth
+                then do
+                  -- let !_ = trace ("freezing buffer") ()
+                  result <- Buffer.Small.freeze buffer
+                  buffer <- Buffer.Small.push t $ Buffer.Small.clear buffer
+                  (i, tail, rest) <- loop (i + 1) buffer ts
+                  let !x = f result
+                  pure (i, tail, x : rest)
+                else do
+                  buffer <- Buffer.Small.push t buffer
+                  -- frozen <- Buffer.Small.freeze buffer'
+                  -- let !_ = trace ("buffer': " ++ show frozen) ()
+                  loop (i + 1) buffer ts
+        loop (0 :: Int) buffer trees
+      {-# INLINE nodesTail #-}
+  -- let nodesTail' f stream = do
+  --       Stream.foldlM'
+  --         ( \(!i, !buffer, ts) t ->
+  --             if Buffer.Small.length buffer == nodeWidth
+  --               then do
+  --                 -- let !_ = trace ("freezing buffer") ()
+  --                 result <- Buffer.Small.freeze buffer
+  --                 buffer <- Buffer.Small.push t $ Buffer.Small.clear buffer
+  --                 let !x = f result
+  --                 pure (i, buffer, Snoc ts x)
+  --               else do
+  --                 buffer <- Buffer.Small.push t buffer
+  --                 pure (i + 1, buffer, ts)
+  --                 -- frozen <- Buffer.Small.freeze buffer'
+  --                 -- let !_ = trace ("buffer': " ++ show frozen) ()
+  --         )
+  --         (0 :: Int, buffer, Nil)
+  --         stream
+  --     {-# INLINE nodesTail' #-}
+  (size, tail, trees) <- nodesTail DataNode ls
+  case trees of
+    [tree] -> do
+      pure $ RootNode {size, shift = keyBits, tail, init = pure tree}
+    ls' -> do
+      buffer <- Buffer.Small.newWithCapacity nodeWidth
+      let nodes f trees buffer = do
+            let loop !buffer [] = do
+                  result <- Buffer.Small.freeze buffer
+                  let !x = f result
+                  pure ([x], buffer)
+                loop buffer (t : ts) = do
+                  if Buffer.Small.length buffer == nodeWidth
+                    then do
+                      result <- Buffer.Small.freeze buffer
+                      buffer' <- Buffer.Small.push t $ Buffer.Small.clear buffer
+                      (rest, buffer) <- loop buffer' ts
+                      let !x = f result
+                      pure (x : rest, buffer)
+                    else do
+                      buffer' <- Buffer.Small.push t buffer
+                      loop buffer' ts
+            loop buffer trees
+      let iterateNodes !shift trees buffer = do
+            (trees, buffer) <- nodes InternalNode trees buffer
+            case trees of
+              [tree] -> do
+                -- let !_ = trace ("tree: " ++ show tree) ()
+                pure RootNode {size, shift, tail, init = getInternalNode tree}
+              trees' -> iterateNodes (shift + keyBits) trees' buffer
+      iterateNodes keyBits ls' buffer
+{-# INLINE fromListIterateShared #-}
+
+munstream :: forall m a. (PrimMonad m) => MBundle m a -> m (Vector a)
+munstream MBundle {mSize, stream} = do
+  (!realSize, !tail, !large) <- createBuffer mSize stream
+  -- let !_ = trace ("realSize: " ++ show realSize) ()
+  -- let !_ = trace ("tail: " ++ show tail) ()
+  -- frozenLarge <- Buffer.Large.freeze large
+  -- let !_ = trace ("large: " ++ show frozenLarge) ()
+  -- let !_ = trace ("large length: " ++ show (Buffer.Large.length large)) ()
+  -- let !_ = trace ("large capacity: " ++ show (Buffer.Large.capacity large)) ()
+  small <- newSmall mSize
+  -- (shift, init) <- fromBuffers small large
+  -- let !_ = trace ("shift: " ++ show shift) ()
+  -- let !_ = trace ("init: " ++ show init) ()
+  -- pure $! RootNode {size = realSize, shift, init, tail}
+  pure empty
+{-# INLINE munstream #-}
+
+createBuffer ::
+  forall m s a.
+  (PrimMonad m, s ~ PrimState m) =>
+  Maybe Int ->
+  Stream m a ->
+  m (Int, Array a, Buffer.Large.Buffer s (Node a))
+createBuffer mSize stream = do
+  small <- newSmall mSize
+  large <- case mSize of
+    Just size ->
+      -- TODO: this is wrong I think
+      Buffer.Large.newWithCapacity $
+        size .>>. keyBits - (if size .&. keyMask == 0 then 1 else 0)
+    Nothing -> Buffer.Large.new
+  (realSize, small, large) <-
+    Stream.foldlM'
+      ( \(!size, !small, !large) x -> do
+          (!small, !large) <-
+            if Buffer.Small.length small == nodeWidth
+              then do
+                -- let !_ = trace ("adding to large") ()
+                frozen <- Buffer.Small.freeze small
+                large <- Buffer.Large.push (DataNode frozen) large
+                pure (Buffer.Small.clear small, large)
+              else pure (small, large)
+          !small <- Buffer.Small.push x small
+          pure (size + 1, small, large)
+      )
+      (0 :: Int, small, large)
+      stream
+  -- (realSize, small, large) <- loop 0 s small large
+  tail <- Buffer.Small.unsafeFreeze small
+  pure (realSize, tail, large)
+-- where
+--   loop ::
+--     Int ->
+--     streamS ->
+--     Buffer.Small.Buffer s a ->
+--     Buffer.Large.Buffer s (Node a) ->
+--     m (Int, Buffer.Small.Buffer s a, Buffer.Large.Buffer s (Node a))
+--   {-# INLINE_INNER loop #-}
+--   loop !i s !small !large = do
+--     next s >>= \case
+--       Yield x s -> do
+--         -- let !_ = trace ("yielding: " ++ show x) ()
+--         -- let !_ = trace ("length of small: " ++ show (Buffer.Small.length small)) ()
+--         (!small, !large) <-
+--           if Buffer.Small.length small == nodeWidth
+--             then do
+--               -- let !_ = trace ("adding to large") ()
+--               frozen <- Buffer.Small.freeze small
+--               large <- Buffer.Large.push (DataNode frozen) large
+--               pure (Buffer.Small.clear small, large)
+--             else pure (small, large)
+--         !small <- Buffer.Small.push x small
+--         loop (i + 1) s small large
+--       Skip s -> loop i s small large
+--       Done -> do
+--         -- let !_ = trace ("done") ()
+--         pure (i, small, large)
+{-# INLINE createBuffer #-}
+
+fromBuffers ::
+  forall m s a.
+  (PrimMonad m, s ~ PrimState m) =>
+  Buffer.Small.Buffer s (Node a) ->
+  Buffer.Large.Buffer s (Node a) ->
+  m (Int, Array (Node a))
+fromBuffers small large
+  | Buffer.Large.length large == 0 = pure (keyBits, mempty)
+  | otherwise = do
+      let loop ::
+            Int ->
+            Buffer.Small.Buffer s (Node a) ->
+            Buffer.Large.Buffer s (Node a) ->
+            m (Int, Array (Node a))
+          loop !shift !small !large
+            | Buffer.Large.length large <= nodeWidth = do
+                -- let !_ = trace ("creating final") ()
+                final <- Buffer.Large.freezeSmall large
+                pure (shift, final)
+            | otherwise = do
+                let go ::
+                      Int ->
+                      Int ->
+                      Buffer.Small.Buffer s (Node a) ->
+                      Buffer.Large.Buffer s (Node a) ->
+                      m (Buffer.Small.Buffer s (Node a), Buffer.Large.Buffer s (Node a))
+                    go !i !j !small !large
+                      | i == Buffer.Large.length large = do
+                          -- frozenSmall <- Buffer.Small.freeze small
+                          -- let !_ = trace ("small: " ++ show frozenSmall) ()
+                          (!j, small) <-
+                            if not $ Buffer.Small.null small
+                              then do
+                                -- let !_ = trace ("writing to large finally at: " ++ show j) ()
+                                frozen <- Buffer.Small.freeze small
+                                Buffer.Large.write j (InternalNode frozen) large
+                                pure (j + 1, Buffer.Small.clear small)
+                              else pure (j, small)
+                          pure (small, Buffer.Large.shrink j large)
+                      | otherwise = do
+                          node <- Buffer.Large.read i large
+                          small <- Buffer.Small.push node small
+                          (small, !j') <-
+                            if (i /= 0) && (((i - 1) .&. keyMask) == 0)
+                              then do
+                                -- let !_ = trace ("writing to large at: " ++ show j) ()
+                                frozen <- Buffer.Small.freeze small
+                                Buffer.Large.write j (InternalNode frozen) large
+                                let !j' = j + 1
+                                pure (Buffer.Small.clear small, j')
+                              else pure (small, j)
+                          go (i + 1) j' small large
+                -- frozenLarge <- Buffer.Large.freeze large
+                -- let !_ = trace ("large: " ++ show frozenLarge) ()
+                (small, large) <- go 0 0 small large
+                let !shift' = shift + keyBits
+                loop shift' small large
+      loop keyBits small large
+{-# INLINE fromBuffers #-}
+
+newSmall :: (PrimMonad m, s ~ PrimState m) => Maybe Int -> m (Buffer.Small.Buffer s a)
+newSmall = \case
+  Nothing -> Buffer.Small.new
+  Just size -> Buffer.Small.newWithCapacity $ min size nodeWidth
+{-# INLINE newSmall #-}
 
 #ifdef INSPECTION
 
