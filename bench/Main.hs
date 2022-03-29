@@ -58,10 +58,8 @@ main =
           ],
       bgroup "fromList" $
         fromLists
-          [ FromList "Data.Vector.Persistent iterate" Vector.Persistent.Internal.fromListIterate,
-            FromList "Data.Vector.Persistent stream" Vector.Persistent.Internal.fromListStream,
+          [ FromList "Data.Vector.Persistent" Vector.Persistent.Internal.fromListIterate,
             FromList "Data.Vector.Persistent naive" (foldl' Vector.Persistent.snoc Vector.Persistent.empty),
-            FromList "Data.Vector.Persistent shared" Vector.Persistent.Internal.fromListIterateShared,
             FromList "Data.RRBVector" RRBVector.fromList,
             FromList "Data.Vector" VB.fromList,
             FromList "Data.HashMap.Strict" sampleHashMap,
