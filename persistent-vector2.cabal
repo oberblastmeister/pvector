@@ -84,7 +84,6 @@ common common-options
     base >= 4.12 && <5,
     primitive >= 0.6.4.0 && <0.8,
     deepseq >=1.1 && <1.5,
-    vector >=0.11 && <0.13,
 
 library
   import: common-options
@@ -96,7 +95,6 @@ library
     Data.Vector.Persistent.Internal.Buffer.Small
     Data.Vector.Persistent.Internal.Buffer.Mutable
     Data.Vector.Persistent.Internal.PrimRef
-    Data.Vector.Persistent.Internal.Bundle
     Data.Vector.Persistent.Internal.Array
   if flag(inspection)
     build-depends:
