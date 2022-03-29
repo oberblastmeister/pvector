@@ -1,23 +1,23 @@
-module Data.Vector.Persistent.Internal.Buffer.Large where
+module Data.Vector.Persistent.Internal.Buffer where
 
 import Control.Monad.Primitive
-import Data.Primitive.Array
 import Data.Primitive.SmallArray
-import Debug.Trace (trace)
 import Prelude hiding (length)
 
 data Buffer s a = Buffer
   { offset :: !Int,
-    marr :: !(MutableArray s a)
+    marr :: !(SmallMutableArray s a)
   }
 
 new :: (PrimMonad m, s ~ PrimState m) => m (Buffer s a)
-new = newWithCapacity 0
+new = do
+  marr <- newSmallArray 0 undefinedElem
+  pure Buffer {offset = 0, marr}
 {-# INLINE new #-}
 
 newWithCapacity :: (PrimMonad m, s ~ PrimState m) => Int -> m (Buffer s a)
 newWithCapacity cap = do
-  marr <- newArray cap undefinedElem
+  marr <- newSmallArray cap undefinedElem
   pure Buffer {offset = 0, marr}
 {-# INLINE newWithCapacity #-}
 
@@ -27,16 +27,16 @@ push a buffer = do
     if length buffer == capacity buffer
       then resize buffer
       else pure buffer
-  writeArray (marr buffer') (length buffer) a
+  writeSmallArray (marr buffer') (length buffer) a
   pure buffer' {offset = offset buffer' + 1}
 {-# INLINE push #-}
 
 read :: (PrimMonad m, s ~ PrimState m) => Int -> Buffer s a -> m a
-read i Buffer {marr} = readArray marr i
+read i Buffer {marr} = readSmallArray marr i
 {-# INLINE read #-}
 
 write :: (PrimMonad m, s ~ PrimState m) => Int -> a -> Buffer s a -> m ()
-write i a Buffer {marr} = writeArray marr i a
+write i a Buffer {marr} = writeSmallArray marr i a
 {-# INLINE write #-}
 
 clear :: Buffer s a -> Buffer s a
@@ -47,9 +47,18 @@ shrink :: Int -> Buffer s a -> Buffer s a
 shrink i buffer = buffer {offset = i}
 {-# INLINE shrink #-}
 
+unsafeShrink :: (PrimMonad m, s ~ PrimState m) => Int -> Buffer s a -> m (Buffer s a)
+unsafeShrink i Buffer {marr} = do
+  shrinkSmallMutableArray marr i
+  pure Buffer {marr, offset = i}
+{-# INLINE unsafeShrink #-}
+
 capacity :: Buffer s a -> Int
-capacity Buffer {marr} = sizeofMutableArray marr
+capacity Buffer {marr} = sizeofSmallMutableArray marr
 {-# INLINE capacity #-}
+
+null :: Buffer s a -> Bool
+null = (0 ==) . length
 
 length :: Buffer s a -> Int
 length = offset
@@ -67,33 +76,18 @@ resize buffer = do
 {-# INLINE resize #-}
 
 grow :: (PrimMonad m, s ~ PrimState m) => Int -> Buffer s a -> m (Buffer s a)
-grow more buffer@Buffer {offset, marr} = do
-  marr' <- newArray (sizeofMutableArray marr + more) undefinedElem
-  copyMutableArray marr' 0 marr 0 offset
+grow more buffer@Buffer {marr, offset} = do
+  marr' <- newSmallArray (sizeofSmallMutableArray marr + more) undefinedElem
+  copySmallMutableArray marr' 0 marr 0 offset
   pure buffer {marr = marr'}
 {-# INLINE grow #-}
 
-empty :: Array a
-empty = mempty
-
-singleton :: a -> Array a
-singleton = pure
-
-freeze :: (PrimMonad m, s ~ PrimState m) => Buffer s a -> m (Array a)
-freeze Buffer {marr, offset} = freezeArray marr 0 offset
+freeze :: (PrimMonad m, s ~ PrimState m) => Buffer s a -> m (SmallArray a)
+freeze Buffer {marr, offset} = freezeSmallArray marr 0 offset
 {-# INLINE freeze #-}
 
-toSmall :: (PrimMonad m, s ~ PrimState m) => Buffer s a -> m (SmallMutableArray s a)
-toSmall Buffer {marr, offset} = do
-  smallMarr <- newSmallArray offset undefinedElem
-  let go i
-        | i == offset = pure ()
-        | otherwise = do
-            x <- readArray marr i
-            writeSmallArray smallMarr i x
-            go $ i + 1
-  go 0
-  pure smallMarr
-
-freezeSmall :: (PrimMonad m, s ~ PrimState m) => Buffer s a -> m (SmallArray a)
-freezeSmall buffer = toSmall buffer >>= unsafeFreezeSmallArray
+unsafeFreeze :: (PrimMonad m, s ~ PrimState m) => Buffer s a -> m (SmallArray a)
+unsafeFreeze Buffer {marr, offset} = do
+  shrinkSmallMutableArray marr offset
+  unsafeFreezeSmallArray marr
+{-# INLINE unsafeFreeze #-}

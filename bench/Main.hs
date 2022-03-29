@@ -4,8 +4,6 @@
 module Main where
 
 import Control.DeepSeq (NFData)
-import Control.Monad.Primitive (PrimMonad, PrimState)
-import Control.Monad.ST (ST, runST)
 import Criterion.Main
 import Data.Foldable (foldl')
 import Data.HashMap.Strict (HashMap)
@@ -16,8 +14,6 @@ import qualified Data.Sequence as Seq
 import qualified Data.Vector as VB
 import qualified Data.Vector.Persistent as Vector.Persistent
 import qualified Data.Vector.Persistent.Internal.Array as Vector.Persistent.Internal.Array
-import qualified Data.Vector.Persistent.Internal.Buffer.Large as Buffer.Large
-import qualified Data.Vector.Persistent.Internal.Buffer.Mutable as Buffer.Mutable
 import GHC.Exts (IsList (..))
 
 data Snocer where
@@ -37,9 +33,6 @@ data Updater where
 
 data Folder where
   Folder :: NFData (f Int) => String -> ([Int] -> f Int) -> (f Int -> Int) -> Folder
-
-data BufferPusher where
-  BufferPusher :: String -> (forall s. ST s (buf s Int)) -> (forall s. Int -> Int -> buf s Int -> ST s ()) -> BufferPusher
 
 sampleHashMap :: [Int] -> HashMap Int Int
 sampleHashMap is = HashMap.fromList $ fmap (\i -> (i, i)) is
@@ -91,12 +84,7 @@ main =
           [ Folder "normal" Vector.Persistent.fromList sum,
             Folder "Data.RRBVector" Vector.Persistent.fromList sum
           ],
-      bgroup "create arrays" $ createArrays,
-      bgroup "push buffers" $
-        pushBuffers
-          [ BufferPusher "mut var" Buffer.Large.new pushBufferLarge,
-            BufferPusher "not mut var" Buffer.Mutable.new pushBufferOther
-          ]
+      bgroup "create arrays" $ createArrays
     ]
   where
     bench' sections = bench $ List.intercalate "/" sections
@@ -197,49 +185,6 @@ main =
         | size <- sizes
       ]
 
-    pushBuffers funcs =
-      [ ( bench'
-            [title, "size " ++ show size]
-            ( whnf
-                ( \size -> runST $ do
-                    buffer <- create
-                    func 0 size buffer
-                )
-                size
-            )
-        )
-        | size <- sizes,
-          BufferPusher title create func <- funcs
-      ]
-
-pushBufferLarge :: (PrimMonad m, s ~ PrimState m) => a -> Int -> Buffer.Large.Buffer s a -> m ()
-pushBufferLarge x times buffer
-  | 0 <- times = pure ()
-  | otherwise = do
-      buffer' <- Buffer.Large.push x buffer
-      pushBufferLarge x (times - 1) buffer'
-
-pushBufferOther :: (PrimMonad m, s ~ PrimState m) => a -> Int -> Buffer.Mutable.Buffer s a -> m ()
-pushBufferOther x times buffer
-  | 0 <- times = pure ()
-  | otherwise = do
-      Buffer.Mutable.push x buffer
-      pushBufferOther x (times - 1) buffer
-
--- snocBench :: String -> Int -> [a] -> ([a] -> seq) -> (seq -> a -> seq) -> Benchmark
--- snocBench name times input constructor snocer =
---   env (pure $ constructor input) $ \seq -> thisth
--- {-# NOINLINE snocBench #-}
-
--- onIntListByMagBenchList :: Int -> ([[Int] -> Benchmark]) -> Benchmark
--- onIntListByMagBenchList amount benchmarks =
---   onSizeByMagBenchList amount $ \size ->
---     env (pure $ enumFromTo 0 size) $ \input -> bgroup "bruh" (fmap ($ input) benchmarks)
--- benchmarks $! enumFromTo 0 size
-
--- onSizeByMagBenchList :: Int -> (Int -> Benchmark) -> [Benchmark]
--- onSizeByMagBenchList amount benchmarks =
---   [bgroup (show size) (benchmarks size) | size <- take amount sizesByMagnitude]
 amounts :: [Int]
 amounts = take 4 allSizes
 
@@ -251,44 +196,3 @@ sizesLarge = take 5 allSizes
 
 allSizes :: [Int]
 allSizes = [10 ^ i | i <- [0 :: Int ..]]
-
--- copyBenches :: Benchmark
--- copyBenches =
---   bgroup
---     "copy"
---     [ copyBenchesWithArr (Array.run $ Array.new_ i)
---       | i <- arrSizes
---     ]
--- {-# NOINLINE copyBenches #-}
-
--- arrSizes :: [Int]
--- arrSizes = [1, 16, 32]
-
--- copyBenchesWithArr :: SmallArray Int -> Benchmark
--- copyBenchesWithArr !arr =
---   bgroup
---     ("size " ++ show (Array.length arr))
---     [ copyBench i arr
---       | i <- take 5 amounts
---     ]
--- {-# NOINLINE copyBenchesWithArr #-}
-
--- copyBench :: Int -> SmallArray Int -> Benchmark
--- copyBench amount !arr = bench (show amount) $ whnf (copyN amount) arr
--- {-# NOINLINE copyBench #-}
-
--- copyN :: Int -> SmallArray a -> SmallArray a
--- copyN i arr
---   | i < 0 = error "less than zero"
---   | otherwise = foldl' (\arr _i -> copy arr) arr [1 .. i]
--- {-# INLINE copyN #-}
-
--- copy :: SmallArray a -> SmallArray a
--- copy arr = Array.create_ len $ \marr -> do
---   Array.copy marr 0 arr 0 len
---   where
---     len = Array.length arr
--- {-# INLINE copy #-}
-
--- amounts :: [Int]
--- amounts = [10 ^ i | i <- [0 :: Int ..]]

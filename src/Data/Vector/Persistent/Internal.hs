@@ -24,7 +24,7 @@ import Data.Primitive.SmallArray
 import qualified Data.Traversable as Traversable
 import Data.Vector.Persistent.Internal.Array (Array)
 import qualified Data.Vector.Persistent.Internal.Array as Array
-import qualified Data.Vector.Persistent.Internal.Buffer.Small as Buffer.Small
+import qualified Data.Vector.Persistent.Internal.Buffer as Buffer
 import GHC.Exts (IsList)
 import qualified GHC.Exts
 import GHC.Generics (Generic)
@@ -562,44 +562,44 @@ fromList ls = case nodesTail ls of
     iterateNodes keyBits ls'
   where
     nodesTail trees = runST $ do
-      buffer <- Buffer.Small.newWithCapacity nodeWidth
+      buffer <- Buffer.newWithCapacity nodeWidth
       (size, buffer, acc) <-
         Foldable.foldlM
           ( \(!i, !buffer, acc) t -> do
-              if Buffer.Small.length buffer == nodeWidth
+              if Buffer.length buffer == nodeWidth
                 then do
-                  result <- Buffer.Small.freeze buffer
-                  buffer <- Buffer.Small.push t $ Buffer.Small.clear buffer
+                  result <- Buffer.freeze buffer
+                  buffer <- Buffer.push t $ Buffer.clear buffer
                   pure (i + 1, buffer, DataNode result : acc)
                 else do
-                  buffer <- Buffer.Small.push t buffer
+                  buffer <- Buffer.push t buffer
                   pure (i + 1, buffer, acc)
           )
           (0 :: Int, buffer, [])
           trees
-      tail <- Buffer.Small.unsafeFreeze buffer
+      tail <- Buffer.unsafeFreeze buffer
       pure (size, tail, acc)
     {-# INLINE nodesTail #-}
 
     nodes trees = runST $ do
-      buffer <- Buffer.Small.newWithCapacity nodeWidth
+      buffer <- Buffer.newWithCapacity nodeWidth
       (buffer, acc) <-
         Foldable.foldlM
           ( \(!buffer, acc) t ->
-              if Buffer.Small.length buffer == nodeWidth
+              if Buffer.length buffer == nodeWidth
                 then do
-                  result <- Buffer.Small.freeze buffer
-                  buffer <- Buffer.Small.push t $ Buffer.Small.clear buffer
+                  result <- Buffer.freeze buffer
+                  buffer <- Buffer.push t $ Buffer.clear buffer
                   -- rest <- loop buffer' ts
                   pure (buffer, InternalNode result : acc)
                 else do
-                  buffer <- Buffer.Small.push t buffer
+                  buffer <- Buffer.push t buffer
                   pure (buffer, acc)
                   -- loop buffer' ts
           )
           (buffer, [])
           trees
-      final <- Buffer.Small.unsafeFreeze buffer
+      final <- Buffer.unsafeFreeze buffer
       pure $ InternalNode final : acc
     {-# INLINE nodes #-}
 {-# INLINE fromList #-}

@@ -91,10 +91,7 @@ library
   exposed-modules:
     Data.Vector.Persistent
     Data.Vector.Persistent.Internal
-    Data.Vector.Persistent.Internal.Buffer.Large
-    Data.Vector.Persistent.Internal.Buffer.Small
-    Data.Vector.Persistent.Internal.Buffer.Mutable
-    Data.Vector.Persistent.Internal.PrimRef
+    Data.Vector.Persistent.Internal.Buffer
     Data.Vector.Persistent.Internal.Array
   if flag(inspection)
     build-depends:
