@@ -35,7 +35,7 @@ import Test.Inspection
 #include "vector.h"
 
 keyBits :: Int
-keyBits = 1
+keyBits = 5
 
 nodeWidth :: Int
 nodeWidth = 1 .<<. keyBits
