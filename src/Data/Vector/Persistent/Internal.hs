@@ -15,17 +15,11 @@ import Data.Bits (Bits, unsafeShiftL, unsafeShiftR, (.&.))
 import Data.Data
 import qualified Data.Foldable as Foldable
 import Data.Functor.Classes
-  ( Read1,
-    Show1,
-    liftReadListDefault,
-    liftReadPrec,
+  ( Show1,
     liftShowsPrec,
-    readData,
-    readUnaryWith,
     showsPrec1,
     showsUnaryWith,
   )
-import qualified Data.Functor.Classes
 import Data.Primitive.SmallArray
 import qualified Data.Traversable as Traversable
 import Data.Vector.Persistent.Internal.Array (Array)
