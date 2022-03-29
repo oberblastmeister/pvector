@@ -6,17 +6,33 @@
 
 module Data.Vector.Persistent.Internal where
 
-import Control.DeepSeq (NFData (rnf))
+import Control.Applicative (Alternative)
+import qualified Control.Applicative
+import Control.DeepSeq (NFData (rnf), NFData1)
+import qualified Control.DeepSeq
 import Control.Monad.ST (runST)
 import Data.Bits (Bits, unsafeShiftL, unsafeShiftR, (.&.))
 import Data.Data
 import qualified Data.Foldable as Foldable
+import Data.Functor.Classes
+  ( Read1,
+    Show1,
+    liftReadListDefault,
+    liftReadPrec,
+    liftShowsPrec,
+    readData,
+    readUnaryWith,
+    showsPrec1,
+    showsUnaryWith,
+  )
+import qualified Data.Functor.Classes
 import Data.Primitive.SmallArray
 import qualified Data.Traversable as Traversable
 import Data.Vector.Persistent.Internal.Array (Array)
 import qualified Data.Vector.Persistent.Internal.Array as Array
 import qualified Data.Vector.Persistent.Internal.Buffer.Small as Buffer.Small
-import GHC.Exts (IsList (..))
+import GHC.Exts (IsList)
+import qualified GHC.Exts
 import GHC.Generics (Generic)
 import GHC.Stack (HasCallStack)
 import Prelude hiding (init, length, map, null, tail)
@@ -46,7 +62,13 @@ data Vector a = RootNode
     init :: !(Array (Node a)),
     tail :: !(Array a)
   }
-  deriving (Show, Data, Typeable, Generic)
+  deriving (Data, Typeable, Generic)
+
+instance Show1 Vector where
+  liftShowsPrec sp sl p v = showsUnaryWith (liftShowsPrec sp sl) "fromList" p (toList v)
+
+instance Show a => Show (Vector a) where
+  showsPrec = showsPrec1
 
 instance Eq a => Eq (Vector a) where
   (==) = persistentVectorEq
@@ -85,14 +107,31 @@ instance NFData a => NFData (Vector a) where
   rnf RootNode {init, tail} = rnf init `seq` rnf tail
   {-# INLINE rnf #-}
 
--- instance MonadFail Vector where
---   fail _ = empty
---   {-# INLINE fail #-}
+instance Applicative Vector where
+  pure = singleton
+  {-# INLINE pure #-}
+  fs <*> xs = Foldable.foldMap' (\f -> map f xs) fs
+  {-# INLINE (<*>) #-}
+
+instance Monad Vector where
+  xs >>= f = Foldable.foldMap' f xs
+  {-# INLINE (>>=) #-}
+
+instance MonadFail Vector where
+  fail _ = empty
+  {-# INLINE fail #-}
+
+instance Alternative Vector where
+  empty = empty
+  (<|>) = (><)
 
 instance NFData a => NFData (Node a) where
   rnf (DataNode as) = rnf as
   rnf (InternalNode ns) = rnf ns
   {-# INLINE rnf #-}
+
+instance NFData1 Vector where
+  liftRnf f = foldl' (\_ x -> f x) ()
 
 data Node a
   = InternalNode {getInternalNode :: !(Array (Node a))}
