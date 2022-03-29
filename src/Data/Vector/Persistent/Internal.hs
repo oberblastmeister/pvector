@@ -35,7 +35,7 @@ import Test.Inspection
 #include "vector.h"
 
 keyBits :: Int
-keyBits = 4
+keyBits = 1
 
 nodeWidth :: Int
 nodeWidth = 1 .<<. keyBits
@@ -435,11 +435,7 @@ unsnoc vec@RootNode {size, tail, init, shift}
           tail' = Array.pop tail
       if Array.null tail'
         then do
-          -- let !_ = trace ("tail is null") ()
-          -- let !_ = trace ("init " ++ show init) ()
           let (# init', tail' #) = unsnocTail# size shift init
-          -- let !_ = trace ("init' " ++ show init') ()
-          -- let !_ = trace ("tail' " ++ show tail') ()
           Just
             ( vec {size = size - 1, init = init', tail = tail'},
               a
@@ -489,11 +485,11 @@ moduleError :: forall a. HasCallStack => String -> String -> a
 moduleError fun msg = error ("Data.Vector.Persistent.Internal" ++ fun ++ ':' : ' ' : msg)
 {-# NOINLINE moduleError #-}
 
-fromList :: Show a => [a] -> Vector a
-fromList = fromListNaive
+fromList :: [a] -> Vector a
+fromList = fromListIterate
 {-# INLINE fromList #-}
 
-fromListStream :: Show a => [a] -> Vector a
+fromListStream :: [a] -> Vector a
 fromListStream = unstream . Bundle.fromList
 
 fromListNaive :: [a] -> Vector a
@@ -632,27 +628,22 @@ fromListIterate [] = empty
 fromListIterate [x] = singleton x
 fromListIterate ls = case nodesTail DataNode ls of
   (size, tail, [tree]) -> do
-    -- let !_ = trace ("tree first: " ++ show tree) ()
-    -- let !_ = trace ("tail first: " ++ show tail) ()
     RootNode {size, shift = keyBits, tail, init = pure tree}
   (size, tail, ls') -> do
     let iterateNodes !shift trees = case nodes InternalNode trees of
           [tree] -> do
-            -- let !_ = trace ("tree: " ++ show tree) ()
             RootNode {size, shift, tail, init = getInternalNode tree}
           trees' -> iterateNodes (shift + keyBits) trees'
     iterateNodes keyBits ls'
   where
     nodesTail f trees = runST $ do
       buffer <- Buffer.Small.newWithCapacity nodeWidth
-      let -- loop i _buffer ts | trace ("loop: " ++ show i ++ " " ++ show ts) False = undefined
-          loop !i !buffer [] = do
+      let loop !i !buffer [] = do
             tail <- Buffer.Small.freeze buffer
             pure (i, tail, [])
           loop i buffer (t : ts) = do
             if Buffer.Small.length buffer == nodeWidth
               then do
-                -- let !_ = trace ("freezing buffer") ()
                 result <- Buffer.Small.freeze buffer
                 buffer' <- Buffer.Small.push t $ Buffer.Small.clear buffer
                 (i, tail, rest) <- loop (i + 1) buffer' ts
@@ -660,8 +651,6 @@ fromListIterate ls = case nodesTail DataNode ls of
                 pure (i, tail, x : rest)
               else do
                 buffer' <- Buffer.Small.push t buffer
-                -- frozen <- Buffer.Small.freeze buffer'
-                -- let !_ = trace ("buffer': " ++ show frozen) ()
                 loop (i + 1) buffer' ts
       loop (0 :: Int) buffer trees
     {-# INLINE nodesTail #-}
@@ -687,101 +676,12 @@ fromListIterate ls = case nodesTail DataNode ls of
     {-# INLINE nodes #-}
 {-# INLINE fromListIterate #-}
 
-data SnocList a = Snoc (SnocList a) a | Nil
-
-fromListIterateShared :: [a] -> Vector a
-fromListIterateShared [] = empty
-fromListIterateShared [x] = singleton x
-fromListIterateShared ls = runST $ do
-  buffer <- Buffer.Small.newWithCapacity nodeWidth
-  let nodesTail f trees = do
-        let -- loop i _buffer ts | trace ("loop: " ++ show i ++ " " ++ show ts) False = undefined
-            loop !i !buffer [] = do
-              tail <- Buffer.Small.freeze buffer
-              pure (i, tail, [])
-            loop i buffer (t : ts) = do
-              if Buffer.Small.length buffer == nodeWidth
-                then do
-                  -- let !_ = trace ("freezing buffer") ()
-                  result <- Buffer.Small.freeze buffer
-                  buffer <- Buffer.Small.push t $ Buffer.Small.clear buffer
-                  (i, tail, rest) <- loop (i + 1) buffer ts
-                  let !x = f result
-                  pure (i, tail, x : rest)
-                else do
-                  buffer <- Buffer.Small.push t buffer
-                  -- frozen <- Buffer.Small.freeze buffer'
-                  -- let !_ = trace ("buffer': " ++ show frozen) ()
-                  loop (i + 1) buffer ts
-        loop (0 :: Int) buffer trees
-      {-# INLINE nodesTail #-}
-  -- let nodesTail' f stream = do
-  --       Stream.foldlM'
-  --         ( \(!i, !buffer, ts) t ->
-  --             if Buffer.Small.length buffer == nodeWidth
-  --               then do
-  --                 -- let !_ = trace ("freezing buffer") ()
-  --                 result <- Buffer.Small.freeze buffer
-  --                 buffer <- Buffer.Small.push t $ Buffer.Small.clear buffer
-  --                 let !x = f result
-  --                 pure (i, buffer, Snoc ts x)
-  --               else do
-  --                 buffer <- Buffer.Small.push t buffer
-  --                 pure (i + 1, buffer, ts)
-  --                 -- frozen <- Buffer.Small.freeze buffer'
-  --                 -- let !_ = trace ("buffer': " ++ show frozen) ()
-  --         )
-  --         (0 :: Int, buffer, Nil)
-  --         stream
-  --     {-# INLINE nodesTail' #-}
-  (size, tail, trees) <- nodesTail DataNode ls
-  case trees of
-    [tree] -> do
-      pure $ RootNode {size, shift = keyBits, tail, init = pure tree}
-    ls' -> do
-      buffer <- Buffer.Small.newWithCapacity nodeWidth
-      let nodes f trees buffer = do
-            let loop !buffer [] = do
-                  result <- Buffer.Small.freeze buffer
-                  let !x = f result
-                  pure ([x], buffer)
-                loop buffer (t : ts) = do
-                  if Buffer.Small.length buffer == nodeWidth
-                    then do
-                      result <- Buffer.Small.freeze buffer
-                      buffer' <- Buffer.Small.push t $ Buffer.Small.clear buffer
-                      (rest, buffer) <- loop buffer' ts
-                      let !x = f result
-                      pure (x : rest, buffer)
-                    else do
-                      buffer' <- Buffer.Small.push t buffer
-                      loop buffer' ts
-            loop buffer trees
-      let iterateNodes !shift trees buffer = do
-            (trees, buffer) <- nodes InternalNode trees buffer
-            case trees of
-              [tree] -> do
-                -- let !_ = trace ("tree: " ++ show tree) ()
-                pure RootNode {size, shift, tail, init = getInternalNode tree}
-              trees' -> iterateNodes (shift + keyBits) trees' buffer
-      iterateNodes keyBits ls' buffer
-{-# INLINE fromListIterateShared #-}
-
 munstream :: forall m a. (PrimMonad m) => MBundle m a -> m (Vector a)
 munstream MBundle {mSize, stream} = do
   (!realSize, !tail, !large) <- createBuffer mSize stream
-  -- let !_ = trace ("realSize: " ++ show realSize) ()
-  -- let !_ = trace ("tail: " ++ show tail) ()
-  -- frozenLarge <- Buffer.Large.freeze large
-  -- let !_ = trace ("large: " ++ show frozenLarge) ()
-  -- let !_ = trace ("large length: " ++ show (Buffer.Large.length large)) ()
-  -- let !_ = trace ("large capacity: " ++ show (Buffer.Large.capacity large)) ()
   small <- newSmall mSize
-  -- (shift, init) <- fromBuffers small large
-  -- let !_ = trace ("shift: " ++ show shift) ()
-  -- let !_ = trace ("init: " ++ show init) ()
-  -- pure $! RootNode {size = realSize, shift, init, tail}
-  pure empty
+  (shift, init) <- fromBuffers small large
+  pure $! RootNode {size = realSize, shift, init, tail}
 {-# INLINE munstream #-}
 
 createBuffer ::
@@ -804,7 +704,6 @@ createBuffer mSize stream = do
           (!small, !large) <-
             if Buffer.Small.length small == nodeWidth
               then do
-                -- let !_ = trace ("adding to large") ()
                 frozen <- Buffer.Small.freeze small
                 large <- Buffer.Large.push (DataNode frozen) large
                 pure (Buffer.Small.clear small, large)
@@ -814,36 +713,8 @@ createBuffer mSize stream = do
       )
       (0 :: Int, small, large)
       stream
-  -- (realSize, small, large) <- loop 0 s small large
   tail <- Buffer.Small.unsafeFreeze small
   pure (realSize, tail, large)
--- where
---   loop ::
---     Int ->
---     streamS ->
---     Buffer.Small.Buffer s a ->
---     Buffer.Large.Buffer s (Node a) ->
---     m (Int, Buffer.Small.Buffer s a, Buffer.Large.Buffer s (Node a))
---   {-# INLINE_INNER loop #-}
---   loop !i s !small !large = do
---     next s >>= \case
---       Yield x s -> do
---         -- let !_ = trace ("yielding: " ++ show x) ()
---         -- let !_ = trace ("length of small: " ++ show (Buffer.Small.length small)) ()
---         (!small, !large) <-
---           if Buffer.Small.length small == nodeWidth
---             then do
---               -- let !_ = trace ("adding to large") ()
---               frozen <- Buffer.Small.freeze small
---               large <- Buffer.Large.push (DataNode frozen) large
---               pure (Buffer.Small.clear small, large)
---             else pure (small, large)
---         !small <- Buffer.Small.push x small
---         loop (i + 1) s small large
---       Skip s -> loop i s small large
---       Done -> do
---         -- let !_ = trace ("done") ()
---         pure (i, small, large)
 {-# INLINE createBuffer #-}
 
 fromBuffers ::
@@ -862,7 +733,6 @@ fromBuffers small large
             m (Int, Array (Node a))
           loop !shift !small !large
             | Buffer.Large.length large <= nodeWidth = do
-                -- let !_ = trace ("creating final") ()
                 final <- Buffer.Large.freezeSmall large
                 pure (shift, final)
             | otherwise = do
@@ -874,12 +744,9 @@ fromBuffers small large
                       m (Buffer.Small.Buffer s (Node a), Buffer.Large.Buffer s (Node a))
                     go !i !j !small !large
                       | i == Buffer.Large.length large = do
-                          -- frozenSmall <- Buffer.Small.freeze small
-                          -- let !_ = trace ("small: " ++ show frozenSmall) ()
                           (!j, small) <-
                             if not $ Buffer.Small.null small
                               then do
-                                -- let !_ = trace ("writing to large finally at: " ++ show j) ()
                                 frozen <- Buffer.Small.freeze small
                                 Buffer.Large.write j (InternalNode frozen) large
                                 pure (j + 1, Buffer.Small.clear small)
@@ -891,15 +758,12 @@ fromBuffers small large
                           (small, !j') <-
                             if (i /= 0) && (((i - 1) .&. keyMask) == 0)
                               then do
-                                -- let !_ = trace ("writing to large at: " ++ show j) ()
                                 frozen <- Buffer.Small.freeze small
                                 Buffer.Large.write j (InternalNode frozen) large
                                 let !j' = j + 1
                                 pure (Buffer.Small.clear small, j')
                               else pure (small, j)
                           go (i + 1) j' small large
-                -- frozenLarge <- Buffer.Large.freeze large
-                -- let !_ = trace ("large: " ++ show frozenLarge) ()
                 (small, large) <- go 0 0 small large
                 let !shift' = shift + keyBits
                 loop shift' small large
@@ -908,7 +772,7 @@ fromBuffers small large
 
 newSmall :: (PrimMonad m, s ~ PrimState m) => Maybe Int -> m (Buffer.Small.Buffer s a)
 newSmall = \case
-  Nothing -> Buffer.Small.new
+  Nothing -> Buffer.Small.newWithCapacity nodeWidth
   Just size -> Buffer.Small.newWithCapacity $ min size nodeWidth
 {-# INLINE newSmall #-}
 

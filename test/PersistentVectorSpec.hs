@@ -21,10 +21,7 @@ spec = parallel $ do
 
   it "toList fromList iterate weird" $ toListFromListIterateProp [1 .. 3]
   
-  describe "shared" $ do
-    prop "toList fromList" toListFromListIterateSharedProp
-
-  xdescribe "stream" $ do
+  describe "stream" $ do
     prop "toList fromList" toListFromListStream
 
     it "toList fromList weird" $ toListFromListStream [1 .. 84]
@@ -108,11 +105,6 @@ toListFromListIterateProp :: [Int] -> Bool
 toListFromListIterateProp l = do
   let !_ = trace ("l: " ++ show l) ()
   l == toList (Vector.fromListIterate l)
-
-toListFromListIterateSharedProp :: [Int] -> Bool
-toListFromListIterateSharedProp l = do
-  let !_ = trace ("l: " ++ show l) ()
-  l == toList (Vector.fromListIterateShared l)
 
 toListFromListStream :: [Int] -> Bool
 toListFromListStream l = do

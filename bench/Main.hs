@@ -21,6 +21,7 @@ import qualified Data.Vector.Persistent.Internal as Vector.Persistent.Internal
 import qualified Data.Vector.Persistent.Internal.Array as Vector.Persistent.Internal.Array
 import qualified Data.Vector.Persistent.Internal.Buffer.Large as Buffer.Large
 import qualified Data.Vector.Persistent.Internal.Buffer.Mutable as Buffer.Mutable
+import qualified Data.Vector.Persistent.Internal.Bundle as Bundle
 import GHC.Exts (IsList (..))
 
 data Snocer where
@@ -28,6 +29,9 @@ data Snocer where
 
 data FromList where
   FromList :: String -> ([Int] -> f Int) -> FromList
+
+data Convert where
+  Convert :: NFData (f Int) => String -> ([Int] -> f Int) -> (f Int -> f Int) -> Convert
 
 data Indexer where
   Indexer :: NFData (f Int) => String -> ([Int] -> f Int) -> (f Int -> Int -> Int) -> Indexer
@@ -43,6 +47,23 @@ sampleHashMap is = HashMap.fromList $ fmap (\i -> (i, i)) is
 
 snocHashMap :: HashMap Int Int -> Int -> HashMap Int Int
 snocHashMap map i = HashMap.insert i i map
+
+convertVectorStream :: Vector.Persistent.Vector a -> Vector.Persistent.Vector a
+convertVectorStream vec =
+  Vector.Persistent.Internal.unstream
+    Bundle.MBundle
+      { Bundle.stream = Vector.Persistent.Internal.stream vec,
+        Bundle.mSize = Nothing
+      }
+{-# INLINE convertVectorStream #-}
+
+convertVectorList :: Vector.Persistent.Vector a -> Vector.Persistent.Vector a
+convertVectorList = Vector.Persistent.fromList . Vector.Persistent.toList
+{-# INLINE convertVectorList #-}
+
+convertVectorVector :: VB.Vector a -> VB.Vector a
+convertVectorVector = fromList . toList
+{-# NOINLINE convertVectorVector #-}
 
 main :: IO ()
 main =
@@ -61,11 +82,16 @@ main =
           [ FromList "Data.Vector.Persistent iterate" Vector.Persistent.Internal.fromListIterate,
             FromList "Data.Vector.Persistent stream" Vector.Persistent.Internal.fromListStream,
             FromList "Data.Vector.Persistent naive" (foldl' Vector.Persistent.snoc Vector.Persistent.empty),
-            FromList "Data.Vector.Persistent shared" Vector.Persistent.Internal.fromListIterateShared,
             FromList "Data.RRBVector" RRBVector.fromList,
             FromList "Data.Vector" VB.fromList,
             FromList "Data.HashMap.Strict" sampleHashMap,
             FromList "Data.Sequence" Seq.fromList
+          ],
+      bgroup "convert" $
+        converts
+          [ Convert "convertVectorStream" fromList convertVectorStream,
+            Convert "convertVectorList" fromList convertVectorList,
+            Convert "convertVectorVector" fromList convertVectorVector
           ],
       bgroup "index" $
         indexers
@@ -112,6 +138,12 @@ main =
           FromList title func <- funcs
       ]
 
+    converts funcs =
+      [ env (pure $ fromList [1 .. size]) $ \vec ->
+          (bench' [title, "size " ++ show size] (whnf func vec))
+        | size <- sizes,
+          Convert title fromList func <- funcs
+      ]
     -- 1.5x faster than RRBVector
     -- 2x slower than Vector
     -- 2x faster than HashMap
