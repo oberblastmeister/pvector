@@ -22,9 +22,6 @@ module Data.Vector.Persistent
     traverse,
     toList,
     fromList,
-    reverse,
-    partition,
-    filter,
     unsnoc,
   )
 where

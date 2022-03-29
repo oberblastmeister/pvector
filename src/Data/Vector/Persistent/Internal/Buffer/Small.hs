@@ -47,6 +47,12 @@ shrink :: Int -> Buffer s a -> Buffer s a
 shrink i buffer = buffer {offset = i}
 {-# INLINE shrink #-}
 
+unsafeShrink :: (PrimMonad m, s ~ PrimState m) => Int -> Buffer s a -> m (Buffer s a)
+unsafeShrink i Buffer {marr} = do
+  shrinkSmallMutableArray marr i
+  pure Buffer {marr, offset = i}
+{-# INLINE unsafeShrink #-}
+
 capacity :: Buffer s a -> Int
 capacity Buffer {marr} = sizeofSmallMutableArray marr
 {-# INLINE capacity #-}

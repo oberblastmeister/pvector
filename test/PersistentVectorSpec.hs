@@ -9,7 +9,6 @@ import Data.Vector.Persistent (Vector)
 import qualified Data.Vector.Persistent.Internal as Vector
 import Data.Vector.Persistent.Internal.Array (Array)
 import qualified Data.Vector.Persistent.Internal.Array as Array
-import Debug.Trace (trace)
 import GHC.Exts (fromList, toList)
 import Test.Hspec
 import Test.Hspec.QuickCheck
@@ -17,20 +16,10 @@ import Test.QuickCheck ((==>))
 
 spec :: Spec
 spec = parallel $ do
-  prop "toList fromList iterate" toListFromListIterateProp
-
-  it "toList fromList iterate weird" $ toListFromListIterateProp [1 .. 3]
-  
-  describe "stream" $ do
-    prop "toList fromList" toListFromListStream
-
-    it "toList fromList weird" $ toListFromListStream [1 .. 84]
-
   prop "toList fromList identity" $ \(l :: [Int]) ->
     l == toList (fromList @(Vector _) l)
 
-  prop "fmap" $ \(l :: [Int]) ->
-    map (+ 20) l == toList (fmap (+ 20) (fromList @(Vector _) l))
+  prop "fmap" fmapProp
 
   prop "foldr" $ \(l :: [Int]) ->
     foldr (:) [] l == foldr (:) [] (fromList @(Vector _) l)
@@ -70,6 +59,12 @@ spec = parallel $ do
 
   prop "snoc unsnoc" snocUnsnocProp
 
+fmapProp :: [Int] -> Bool
+fmapProp l = do
+  let vec = fmap (+ 20) (fromList @(Vector _) l)
+      res = toList vec
+  map (+ 20) l == res
+
 snocUnsnocProp :: Int -> Bool
 snocUnsnocProp times = do
   Vector.null
@@ -100,16 +95,6 @@ unsnoc' :: Vector a -> Vector a
 unsnoc' vec = case Vector.unsnoc vec of
   Just (vec, _) -> vec
   _ -> error "empty vector"
-
-toListFromListIterateProp :: [Int] -> Bool
-toListFromListIterateProp l = do
-  let !_ = trace ("l: " ++ show l) ()
-  l == toList (Vector.fromListIterate l)
-
-toListFromListStream :: [Int] -> Bool
-toListFromListStream l = do
-  let !_ = trace ("l: " ++ show l) ()
-  l == toList (Vector.fromListStream l)
 
 indexProp :: Int -> [Int] -> Bool
 indexProp ix l = do

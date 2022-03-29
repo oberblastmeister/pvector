@@ -8,20 +8,16 @@ import Control.Monad.Primitive (PrimMonad, PrimState)
 import Control.Monad.ST (ST, runST)
 import Criterion.Main
 import Data.Foldable (foldl')
-import Data.Functor.Identity (runIdentity)
 import Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as HashMap
 import qualified Data.List as List
 import qualified Data.RRBVector as RRBVector
 import qualified Data.Sequence as Seq
 import qualified Data.Vector as VB
-import qualified Data.Vector.Fusion.Stream.Monadic as Stream
 import qualified Data.Vector.Persistent as Vector.Persistent
-import qualified Data.Vector.Persistent.Internal as Vector.Persistent.Internal
 import qualified Data.Vector.Persistent.Internal.Array as Vector.Persistent.Internal.Array
 import qualified Data.Vector.Persistent.Internal.Buffer.Large as Buffer.Large
 import qualified Data.Vector.Persistent.Internal.Buffer.Mutable as Buffer.Mutable
-import qualified Data.Vector.Persistent.Internal.Bundle as Bundle
 import GHC.Exts (IsList (..))
 
 data Snocer where
@@ -30,14 +26,17 @@ data Snocer where
 data FromList where
   FromList :: String -> ([Int] -> f Int) -> FromList
 
-data Convert where
-  Convert :: NFData (f Int) => String -> ([Int] -> f Int) -> (f Int -> f Int) -> Convert
+data Map where
+  Map :: NFData (f Int) => String -> ([Int] -> f Int) -> (f Int -> f Int) -> Map
 
 data Indexer where
   Indexer :: NFData (f Int) => String -> ([Int] -> f Int) -> (f Int -> Int -> Int) -> Indexer
 
-data VectorFolder where
-  VectorFolder :: String -> (Vector.Persistent.Vector Int -> Int) -> VectorFolder
+data Updater where
+  Updater :: NFData (f Int) => String -> ([Int] -> f Int) -> (f Int -> Int -> f Int) -> Updater
+
+data Folder where
+  Folder :: NFData (f Int) => String -> ([Int] -> f Int) -> (f Int -> Int) -> Folder
 
 data BufferPusher where
   BufferPusher :: String -> (forall s. ST s (buf s Int)) -> (forall s. Int -> Int -> buf s Int -> ST s ()) -> BufferPusher
@@ -47,23 +46,6 @@ sampleHashMap is = HashMap.fromList $ fmap (\i -> (i, i)) is
 
 snocHashMap :: HashMap Int Int -> Int -> HashMap Int Int
 snocHashMap map i = HashMap.insert i i map
-
-convertVectorStream :: Vector.Persistent.Vector a -> Vector.Persistent.Vector a
-convertVectorStream vec =
-  Vector.Persistent.Internal.unstream
-    Bundle.MBundle
-      { Bundle.stream = Vector.Persistent.Internal.stream vec,
-        Bundle.mSize = Nothing
-      }
-{-# INLINE convertVectorStream #-}
-
-convertVectorList :: Vector.Persistent.Vector a -> Vector.Persistent.Vector a
-convertVectorList = Vector.Persistent.fromList . Vector.Persistent.toList
-{-# INLINE convertVectorList #-}
-
-convertVectorVector :: VB.Vector a -> VB.Vector a
-convertVectorVector = fromList . toList
-{-# NOINLINE convertVectorVector #-}
 
 main :: IO ()
 main =
@@ -79,19 +61,17 @@ main =
           ],
       bgroup "fromList" $
         fromLists
-          [ FromList "Data.Vector.Persistent iterate" Vector.Persistent.Internal.fromListIterate,
-            FromList "Data.Vector.Persistent stream" Vector.Persistent.Internal.fromListStream,
+          [ FromList "Data.Vector.Persistent" Vector.Persistent.fromList,
             FromList "Data.Vector.Persistent naive" (foldl' Vector.Persistent.snoc Vector.Persistent.empty),
             FromList "Data.RRBVector" RRBVector.fromList,
             FromList "Data.Vector" VB.fromList,
             FromList "Data.HashMap.Strict" sampleHashMap,
             FromList "Data.Sequence" Seq.fromList
           ],
-      bgroup "convert" $
-        converts
-          [ Convert "convertVectorStream" fromList convertVectorStream,
-            Convert "convertVectorList" fromList convertVectorList,
-            Convert "convertVectorVector" fromList convertVectorVector
+      bgroup "map" $
+        maps
+          [ Map "Data.Vector.Persistent" fromList (Vector.Persistent.map (20 +)),
+            Map "Data.RRBVector" fromList (RRBVector.map (20 +))
           ],
       bgroup "index" $
         indexers
@@ -101,11 +81,15 @@ main =
             Indexer "Data.HashMap.Strict" sampleHashMap (HashMap.!),
             Indexer "Data.Sequence" fromList Seq.index
           ],
+      bgroup "update" $
+        updaters
+          [ Updater "Data.Vector.Persistent" fromList (\vec i -> Vector.Persistent.update vec i i),
+            Updater "Data.RRBVector" fromList (\vec i -> RRBVector.update i i vec)
+          ],
       bgroup "fold" $
         vectorFolders
-          [ VectorFolder "normal" sum,
-            VectorFolder "stream" (runIdentity . Stream.foldl' (+) 0 . Vector.Persistent.Internal.stream),
-            VectorFolder "stream reversed" (runIdentity . Stream.foldl' (+) 0 . Vector.Persistent.Internal.streamR)
+          [ Folder "normal" Vector.Persistent.fromList sum,
+            Folder "Data.RRBVector" Vector.Persistent.fromList sum
           ],
       bgroup "create arrays" $ createArrays,
       bgroup "push buffers" $
@@ -117,7 +101,7 @@ main =
   where
     bench' sections = bench $ List.intercalate "/" sections
 
-    -- 1.5x faster than RRBVector
+    -- 1.5x-2x faster than RRBVector
     -- 2x faster than HashMap
     -- way slower than Seq
     snocs funcs =
@@ -134,16 +118,17 @@ main =
     fromLists funcs =
       [ env (pure [1 .. size]) $ \list ->
           (bench' [title, "size " ++ show size] (whnf func list))
-        | size <- sizes,
+        | size <- sizesLarge,
           FromList title func <- funcs
       ]
 
-    converts funcs =
+    maps funcs =
       [ env (pure $ fromList [1 .. size]) $ \vec ->
           (bench' [title, "size " ++ show size] (whnf func vec))
-        | size <- sizes,
-          Convert title fromList func <- funcs
+        | size <- take 4 $ drop 4 allSizes,
+          Map title fromList func <- funcs
       ]
+
     -- 1.5x faster than RRBVector
     -- 2x slower than Vector
     -- 2x faster than HashMap
@@ -171,14 +156,29 @@ main =
           Indexer title sample func <- funcs
       ]
 
+    updaters funcs =
+      [ env
+          ( let seq = sample indices
+                indices = [0 .. size - 1]
+             in pure (seq, indices)
+          )
+          $ \(~(seq, indices)) ->
+            ( bench'
+                [title, "size " ++ show size]
+                (whnf (\indices -> foldl' func seq indices) indices)
+            )
+        | size <- take 6 allSizes,
+          Updater title sample func <- funcs
+      ]
+
     vectorFolders funcs =
-      [ env (pure $ Vector.Persistent.fromList [1 .. size]) $ \vec ->
+      [ env (pure $ fromList [1 .. size]) $ \vec ->
           ( bench'
               [title, "size " ++ show size]
               (whnf func vec)
           )
         | size <- sizes,
-          VectorFolder title func <- funcs
+          Folder title fromList func <- funcs
       ]
 
     createArrays =
@@ -245,6 +245,9 @@ amounts = take 4 allSizes
 
 sizes :: [Int]
 sizes = take 4 allSizes
+
+sizesLarge :: [Int]
+sizesLarge = take 5 allSizes
 
 allSizes :: [Int]
 allSizes = [10 ^ i | i <- [0 :: Int ..]]
