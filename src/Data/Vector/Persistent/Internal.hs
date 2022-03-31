@@ -29,7 +29,7 @@ import GHC.Exts (IsList)
 import qualified GHC.Exts
 import GHC.Generics (Generic)
 import GHC.Stack (HasCallStack)
-import Prelude hiding (init, length, map, null, tail)
+import Prelude hiding (lookup, init, length, map, null, tail)
 
 #ifdef INSPECTION
 {-# LANGUAGE TemplateHaskell #-}
@@ -40,12 +40,12 @@ keyBits :: Int
 keyBits = 5
 
 nodeWidth :: Int
-nodeWidth = 1 .<<. keyBits
+nodeWidth = 1 !<<. keyBits
 
 keyMask :: Int
 keyMask = nodeWidth - 1
 
-type role Vector nominal
+type role Vector representational
 
 -- invariant: the only time tail can be empty is when init is empty
 -- or else tailOffset will give the wrong value
@@ -238,15 +238,15 @@ null :: Vector a -> Bool
 null xs = length xs == 0
 {-# INLINE null #-}
 
-(.<<.) :: Bits a => a -> Int -> a
-(.<<.) = unsafeShiftL
-{-# INLINE (.<<.) #-}
+(!<<.) :: Bits a => a -> Int -> a
+(!<<.) = unsafeShiftL
+{-# INLINE (!<<.) #-}
 
-(.>>.) :: Bits a => a -> Int -> a
-(.>>.) = unsafeShiftR
-{-# INLINE (.>>.) #-}
+(!>>.) :: Bits a => a -> Int -> a
+(!>>.) = unsafeShiftR
+{-# INLINE (!>>.) #-}
 
-infixl 8 .<<., .>>.
+infixl 8 !<<., !>>.
 
 (|>) :: Vector a -> a -> Vector a
 (|>) = snoc
@@ -265,6 +265,8 @@ pattern Empty <-
   (null -> True)
   where
     Empty = empty
+
+{-# COMPLETE (:|>), Empty #-}
 
 -- | \( O(1) \) Append an element to the end of the vector.
 snoc :: Vector a -> a -> Vector a
@@ -316,13 +318,14 @@ snocArr vec@RootNode {size, shift, tail} addedSize arr
           tail = arr,
           init = Array.empty
         }
-  | size .>>. keyBits > 1 .<<. shift =
+  | size !>>. keyBits > 1 !<<. shift =
       RootNode
         { size = size + addedSize,
           shift = shift + keyBits,
           init =
             let !path = newPath shift tail
-             in Array.fromListN 2 [InternalNode (init vec), path],
+                !internal = InternalNode $ init vec
+             in Array.fromListN 2 [internal, path],
           tail = arr
         }
   | otherwise =
@@ -362,7 +365,7 @@ snocTail size tail = go
               let vec' = Array.index parent subIx
                in InternalNode $ go (level - keyBits) (getInternalNode vec')
           | otherwise = newPath (level - keyBits) tail
-        subIx = ((size - 1) .>>. level) .&. keyMask
+        subIx = ((size - 1) !>>. level) .&. keyMask
 {-# INLINE snocTail #-}
 
 newPath :: Int -> Array a -> Node a
@@ -377,41 +380,40 @@ unsafeIndex# :: Vector a -> Int -> (# a #)
 unsafeIndex# vec ix
   | ix >= tailOffset vec = Array.index# (tail vec) (ix .&. keyMask)
   -- no need to use keyMask here as we are at the top
-  | otherwise = go (shift vec - keyBits) (Array.index (init vec) (ix .>>. shift vec))
+  | otherwise = go (shift vec - keyBits) (Array.index (init vec) (ix !>>. shift vec))
   where
     go 0 !node = Array.index# (getDataNode node) (ix .&. keyMask)
     go level !node = go (level - keyBits) (Array.index (getInternalNode node) ix')
       where
-        ix' = (ix .>>. level) .&. keyMask
+        ix' = (ix !>>. level) .&. keyMask
 {-# INLINE unsafeIndex# #-}
 
-indexMaybe :: Vector a -> Int -> Maybe a
-indexMaybe vec ix
+lookup :: Int -> Vector a -> Maybe a
+lookup ix vec
   -- Check if the index is valid. This funny business uses a single test to
   -- determine whether ix is too small (negative) or too large (at least the
   -- length of the vector).
-  | (fromIntegral ix :: Word) < fromIntegral (length vec) =
-      Just $ unsafeIndex vec ix
+  | (fromIntegral ix :: Word) < fromIntegral (length vec) = Just $ unsafeIndex vec ix
   | otherwise = Nothing
-{-# INLINE indexMaybe #-}
+{-# INLINE lookup #-}
 
-index :: HasCallStack => Vector a -> Int -> a
-index vec ix
+index :: HasCallStack =>  Int -> Vector a -> a
+index ix vec
   | ix < 0 = moduleError "index" $ "negative index: " ++ show ix
   | ix >= length vec = moduleError "index" $ "index too large: " ++ show ix
   | otherwise = unsafeIndex vec ix
 {-# INLINE index #-}
 
 (!) :: HasCallStack => Vector a -> Int -> a
-(!) = index
+(!) = flip index
 {-# INLINE (!) #-}
 
 (!?) :: Vector a -> Int -> Maybe a
-(!?) = indexMaybe
+(!?) = flip lookup
 {-# INLINE (!?) #-}
 
-modify :: Vector a -> Int -> (a -> a) -> Vector a
-modify vec@RootNode {size, shift, tail} ix f
+adjust :: (a -> a) -> Int -> Vector a -> Vector a
+adjust f ix vec@RootNode {size, shift, tail}
   -- Invalid index. This funny business uses a single test to determine whether
   -- ix is too small (negative) or too large (at least sz).
   | (fromIntegral ix :: Word) >= fromIntegral size = vec
@@ -426,12 +428,12 @@ modify vec@RootNode {size, shift, tail} ix f
         let !node = go (level - keyBits) (getInternalNode vec') =
           Array.update vec ix' $! InternalNode node
       where
-        ix' = (ix .>>. level) .&. keyBits
+        ix' = (ix !>>. level) .&. keyBits
         vec' = Array.index vec ix'
-{-# INLINE modify #-}
+{-# INLINE adjust #-}
 
-update :: Vector a -> Int -> a -> Vector a
-update vec@RootNode {size, shift, tail} ix a
+update :: Int -> a -> Vector a -> Vector a
+update ix a vec@RootNode {size, shift, tail}
   -- Invalid index. This funny business uses a single test to determine whether
   -- ix is too small (negative) or too large (at least sz).
   | (fromIntegral ix :: Word) >= fromIntegral size = vec
@@ -446,7 +448,7 @@ update vec@RootNode {size, shift, tail} ix a
         let !node = go (level - keyBits) (getInternalNode vec') =
           Array.update vec ix' $! InternalNode node
       where
-        ix' = (ix .>>. level) .&. keyMask
+        ix' = (ix !>>. level) .&. keyMask
         vec' = Array.index vec ix'
 {-# INLINE update #-}
 
@@ -461,15 +463,8 @@ unsnoc vec@RootNode {size, tail, init, shift}
       if Array.null tail'
         then do
           let (# init', tail' #) = unsnocTail# size shift init
-          Just
-            ( vec {size = size - 1, init = init', tail = tail'},
-              a
-            )
-        else do
-          Just
-            ( vec {size = size - 1, tail = tail'},
-              a
-            )
+          Just (vec {size = size - 1, init = init', tail = tail'}, a)
+        else Just (vec {size = size - 1, tail = tail'}, a)
 {-# INLINE unsnoc #-}
 
 unsnocTail# :: Int -> Int -> Array (Node a) -> (# Array (Node a), Array a #)
@@ -486,7 +481,7 @@ unsnocTail# size = go
         child = Array.index parent subIx
         -- we need to subtract 2 because the first subtraction gets us to the tail element
         -- the second subtraction gets to the last element in the tree
-        subIx = ((size - 2) .>>. level) .&. keyMask
+        subIx = ((size - 2) !>>. level) .&. keyMask
 {-# INLINE unsnocTail# #-}
 
 -- | The index of the first element of the tail of the vector (that is, the
@@ -495,7 +490,7 @@ unsnocTail# size = go
 --
 -- Caution: Only gives a sensible result if the vector is nonempty.
 tailOffset :: Vector a -> Int
-tailOffset vec = (length vec - 1) .&. ((-1) .<<. keyBits)
+tailOffset vec = (length vec - 1) .&. ((-1) !<<. keyBits)
 {-# INLINE tailOffset #-}
 
 -- | \( O(1) \) Get the length of the vector.
@@ -538,7 +533,7 @@ traverse f vec@RootNode {init, tail} =
 (//) :: Vector a -> [(Int, a)] -> Vector a
 (//) vec = Foldable.foldl' go vec
   where
-    go v (ix, a) = update v ix a
+    go v (ix, a) = update ix a v
 
 (><) :: Vector a -> Vector a -> Vector a
 (><) = foldl' snoc

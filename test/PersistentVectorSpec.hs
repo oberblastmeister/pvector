@@ -33,7 +33,7 @@ spec = parallel $ do
           arr'
             | ix >= Array.length arr = arr
             | otherwise = Array.update arr ix a
-      toList arr' == toList (Vector.update (fromList @(Vector _) l) ix a)
+      toList arr' == toList (Vector.update ix a $ fromList @(Vector _) l)
 
   prop "traverse" $ \(l :: [Int]) -> do
     let go a = ([a], a)
@@ -115,4 +115,4 @@ indexProp ix l = do
   -- !_ = trace ("ix: " ++ show ix) ()
   -- !_ = trace ("l: " ++ show l) ()
   -- !_ = trace ("vec: " ++ show vec) ()
-  indexMaybeList l ix == Vector.indexMaybe (vec) ix
+  indexMaybeList l ix == Vector.lookup ix vec

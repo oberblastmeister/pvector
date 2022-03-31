@@ -1,4 +1,4 @@
-module Data.Vector.Persistent
+module Data.Vector.Persistent.Strict
   ( foldr,
     foldr',
     foldl,
@@ -26,7 +26,8 @@ module Data.Vector.Persistent
   )
 where
 
-import Data.Vector.Persistent.Internal
+import Data.Vector.Persistent.Internal hiding (adjust, snoc, update, (//))
+import Data.Vector.Persistent.Strict.Internal
 import Prelude hiding
   ( filter,
     foldl,

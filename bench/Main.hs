@@ -1,5 +1,4 @@
-{-# LANGUAGE BangPatterns #-}
-{-# LANGUAGE ExistentialQuantification #-}
+{-# LANGUAGE PackageImports #-}
 
 module Main where
 
@@ -9,11 +8,14 @@ import Data.Foldable (foldl')
 import Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as HashMap
 import qualified Data.List as List
+import Data.Maybe (fromJust)
 import qualified Data.RRBVector as RRBVector
 import qualified Data.Sequence as Seq
 import qualified Data.Vector as VB
-import qualified Data.Vector.Persistent as Vector.Persistent
-import qualified Data.Vector.Persistent.Internal.Array as Vector.Persistent.Internal.Array
+import qualified "persistent-vector" Data.Vector.Persistent as Vector.Persistent.Other
+import qualified "persistent-vector2" Data.Vector.Persistent as Vector.Persistent
+import qualified "persistent-vector2" Data.Vector.Persistent.Internal.Array as Vector.Persistent.Internal.Array
+import qualified "persistent-vector2" Data.Vector.Persistent.Internal.RAList as RAList
 import GHC.Exts (IsList (..))
 
 data Snocer where
@@ -47,6 +49,7 @@ main =
     [ bgroup "snoc" $
         snocs
           [ Snocer "Data.Vector.Persistent" fromList Vector.Persistent.snoc,
+            Snocer "Data.Vector.Persistent.Other" Vector.Persistent.Other.fromList Vector.Persistent.Other.snoc,
             Snocer "Data.RRBVector" fromList (RRBVector.|>),
             Snocer "Data.Vector" fromList VB.snoc,
             Snocer "Data.HashMap.Strict" sampleHashMap snocHashMap,
@@ -68,15 +71,17 @@ main =
           ],
       bgroup "index" $
         indexers
-          [ Indexer "Data.Vector.Persistent" fromList Vector.Persistent.index,
-            Indexer "Data.RRBVector" fromList (flip RRBVector.index),
-            Indexer "Data.Vector" fromList (VB.!),
-            Indexer "Data.HashMap.Strict" sampleHashMap (HashMap.!),
-            Indexer "Data.Sequence" fromList Seq.index
+          [ Indexer "Data.Vector.Persistent" fromList (\vec i -> fromJust $ Vector.Persistent.lookup i vec),
+            Indexer "Data.Vector.Persistent.Other" Vector.Persistent.Other.fromList (\vec i -> fromJust $ Vector.Persistent.Other.index vec i),
+            Indexer "Data.RRBVector" fromList (\vec i -> fromJust $ RRBVector.lookup i vec),
+            Indexer "Data.Vector" fromList (\vec i -> fromJust $ vec VB.!? i),
+            Indexer "Data.HashMap.Strict" sampleHashMap (\map i -> fromJust $ map HashMap.!? i),
+            Indexer "Data.Sequence" fromList (\seq i -> fromJust $ seq Seq.!? i),
+            Indexer "Data.RAList" RAList.fromList (flip RAList.index)
           ],
       bgroup "update" $
         updaters
-          [ Updater "Data.Vector.Persistent" fromList (\vec i -> Vector.Persistent.update vec i i),
+          [ Updater "Data.Vector.Persistent" fromList (\vec i -> Vector.Persistent.update i i vec),
             Updater "Data.RRBVector" fromList (\vec i -> RRBVector.update i i vec)
           ],
       bgroup "fold" $
@@ -93,31 +98,30 @@ main =
     -- 2x faster than HashMap
     -- way slower than Seq
     snocs funcs =
-      [ env (pure $ sample [1 .. size]) $ \seq -> env (pure [1 .. amount]) $ \list ->
+      [ env (pure $ sample []) $ \seq -> env (pure [1 .. size]) $ \list ->
           ( bench'
-              [title, "size " ++ show size, "amount " ++ show amount]
+              [title, "size " ++ show size]
               (whnf (foldl' func seq) list)
           )
         | size <- sizes,
-          amount <- amounts,
           Snocer title sample func <- funcs
       ]
 
     fromLists funcs =
       [ env (pure [1 .. size]) $ \list ->
           (bench' [title, "size " ++ show size] (whnf func list))
-        | size <- sizesLarge,
+        | size <- sizes,
           FromList title func <- funcs
       ]
 
     maps funcs =
       [ env (pure $ fromList [1 .. size]) $ \vec ->
           (bench' [title, "size " ++ show size] (whnf func vec))
-        | size <- take 4 $ drop 4 allSizes,
+        | size <- sizes,
           Map title fromList func <- funcs
       ]
 
-    -- 1.5x faster than RRBVector
+    -- 1.5x-2x faster than RRBVector
     -- 2x slower than Vector
     -- 2x faster than HashMap
     -- Seq has really slow indexing
@@ -140,7 +144,7 @@ main =
                     indices
                 )
             )
-        | size <- sizes,
+        | size <- take 4 $ drop 5 allSizes,
           Indexer title sample func <- funcs
       ]
 
@@ -185,14 +189,8 @@ main =
         | size <- sizes
       ]
 
-amounts :: [Int]
-amounts = take 4 allSizes
-
 sizes :: [Int]
-sizes = take 4 allSizes
-
-sizesLarge :: [Int]
-sizesLarge = take 5 allSizes
+sizes = take 5 allSizes
 
 allSizes :: [Int]
 allSizes = [10 ^ i | i <- [0 :: Int ..]]
