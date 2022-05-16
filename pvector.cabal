@@ -1,0 +1,143 @@
+cabal-version:      3.6
+name:               pvector
+version:            0.1.0.0
+
+-- A short (one-line) description of the package.
+-- synopsis:
+
+-- A longer description of the package.
+-- description:
+
+-- A URL where users can report bugs.
+-- bug-reports:
+
+-- The license under which the package is released.
+-- license:
+author:             brian
+maintainer:         littlebubu.shu@gmail.com
+
+-- A copyright notice.
+-- copyright:
+-- category:
+extra-source-files: CHANGELOG.md
+
+flag inspection
+  description: Enable inspection testing
+  manual: True
+  default: False
+
+common common-options
+  if flag(inspection)
+    cpp-options: -DINSPECTION
+
+  -- yay
+  default-language: Haskell2010
+  default-extensions:
+    FlexibleInstances,
+    FlexibleContexts,
+    InstanceSigs,
+    MultiParamTypeClasses,
+    ConstraintKinds,
+    LambdaCase,
+    EmptyCase,
+    TupleSections,
+    BangPatterns,
+    TypeApplications,
+    StandaloneDeriving,
+    OverloadedStrings,
+    RankNTypes,
+    ScopedTypeVariables,
+    NamedFieldPuns,
+    DuplicateRecordFields,
+    DataKinds,
+    ConstraintKinds,
+    TypeApplications,
+    KindSignatures,
+    StandaloneKindSignatures,
+    DeriveFoldable,
+    DeriveFunctor,
+    DeriveGeneric,
+    DeriveDataTypeable,
+    DeriveLift,
+    DeriveTraversable ,
+    GeneralizedNewtypeDeriving,
+    GADTs,
+    PolyKinds,
+    ViewPatterns,
+    PatternSynonyms,
+    TypeFamilies,
+    TypeFamilyDependencies,
+    FunctionalDependencies,
+    ExistentialQuantification,
+    TypeOperators,
+  ghc-options:
+    -Wall
+    -Wincomplete-record-updates
+    -Wredundant-constraints
+    -Wno-name-shadowing
+    -- until OverloadedRecordUpdate stabilizes
+    -Wno-ambiguous-fields
+    -Werror=incomplete-patterns
+    -Werror=incomplete-uni-patterns
+    -Werror=missing-methods
+  build-depends:
+    base >= 4.12 && <5,
+    primitive >= 0.6.4.0 && <0.8,
+    deepseq >=1.1 && <1.5,
+    indexed-traversable ^>= 0.1,
+
+library
+  import: common-options
+  hs-source-dirs: src
+  exposed-modules:
+    Data.Vector.Persistent
+    Data.Vector.Persistent.Strict
+    Data.Vector.Persistent.Strict.Internal
+    Data.Vector.Persistent.Lazy
+    Data.Vector.Persistent.Unsafe
+    Data.Vector.Persistent.Internal
+    Data.Vector.Persistent.Internal.Buffer
+    Data.Vector.Persistent.Internal.Array
+  if flag(inspection)
+    build-depends:
+      inspection-testing ^>= 0.4.6.0,
+  ghc-options: -ddump-simpl -ddump-stg-final -ddump-cmm -ddump-asm -ddump-to-file
+  ghc-options: -dsuppress-coercions -dsuppress-unfoldings -dsuppress-module-prefixes
+  ghc-options: -dsuppress-uniques -dsuppress-timestamps
+
+common rtsopts
+  ghc-options:
+    -threaded
+    -rtsopts
+    -with-rtsopts=-N
+
+test-suite pvector-test
+  import: common-options, rtsopts
+  type: exitcode-stdio-1.0
+  hs-source-dirs: test
+  main-is: Spec.hs
+  other-modules:
+    PersistentVectorSpec
+  build-depends:
+    pvector,
+    hspec ^>= 2.9.4,
+    QuickCheck ^>= 2.14.2,
+    quickcheck-instances ^>= 0.3.27,
+    inspection-testing ^>= 0.4.6.0,
+  build-tool-depends:
+    hspec-discover:hspec-discover,
+
+benchmark pvector-bench
+  import: common-options, rtsopts
+  type: exitcode-stdio-1.0
+  hs-source-dirs: bench
+  main-is: Main.hs
+  ghc-options: -O2
+  build-depends:
+    pvector,
+    criterion ^>= 1.5.13.0,
+    rrb-vector,
+    vector ^>= 0.12.3.1,
+    unordered-containers ^>= 0.2.17.0,
+    containers ^>= 0.6.5.1,
+    persistent-vector ^>= 0.2.0,

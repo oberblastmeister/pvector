@@ -1,0 +1,6 @@
+packages:
+    ./
+    ../rrb-vector
+
+tests: True
+benchmarks: True
