@@ -13,7 +13,7 @@ import qualified Data.RRBVector as RRBVector
 import qualified Data.Sequence as Seq
 import qualified Data.Vector as VB
 import qualified "persistent-vector" Data.Vector.Persistent as Vector.Persistent.Other
-import qualified "persistent-vector2" Data.Vector.Persistent as Vector.Persistent
+import qualified "pvector" Data.Vector.Persistent as Vector.Persistent
 import GHC.Exts (IsList (..))
 
 data Snocer where
@@ -44,29 +44,30 @@ main :: IO ()
 main =
   defaultMainWith
     defaultConfig
-    [ bgroup "snoc" $
-        snocs
-          [ Snocer "Data.Vector.Persistent" fromList Vector.Persistent.snoc,
-            Snocer "Data.Vector.Persistent.Other" Vector.Persistent.Other.fromList Vector.Persistent.Other.snoc
-            -- Snocer "Data.RRBVector" fromList (RRBVector.|>),
-            -- Snocer "Data.Vector" fromList VB.snoc,
-            -- Snocer "Data.HashMap.Strict" sampleHashMap snocHashMap,
-            -- Snocer "Data.Sequence" fromList (Seq.|>)
-          ],
-      bgroup "fromList" $
-        fromLists
-          [ FromList "Data.Vector.Persistent" Vector.Persistent.fromList,
-            FromList "Data.RRBVector" RRBVector.fromList,
-            FromList "Data.Vector" VB.fromList,
-            FromList "Data.HashMap.Strict" sampleHashMap,
-            FromList "Data.Sequence" Seq.fromList
-          ],
-      bgroup "map" $
-        maps
-          [ Map "Data.Vector.Persistent" fromList (Vector.Persistent.map (20 +)),
-            Map "Data.Vector.Persistent.Other" Vector.Persistent.Other.fromList (Vector.Persistent.Other.map (20 +)),
-            Map "Data.RRBVector" fromList (RRBVector.map (20 +))
-          ],
+    [
+    -- bgroup "snoc" $
+    --     snocs
+    --       [ Snocer "Data.Vector.Persistent" fromList Vector.Persistent.snoc,
+    --         Snocer "Data.Vector.Persistent.Other" Vector.Persistent.Other.fromList Vector.Persistent.Other.snoc
+    --         -- Snocer "Data.RRBVector" fromList (RRBVector.|>),
+    --         -- Snocer "Data.Vector" fromList VB.snoc,
+    --         -- Snocer "Data.HashMap.Strict" sampleHashMap snocHashMap,
+    --         -- Snocer "Data.Sequence" fromList (Seq.|>)
+    --       ],
+      -- bgroup "fromList" $
+      --   fromLists
+      --     [ FromList "Data.Vector.Persistent" Vector.Persistent.fromList,
+      --       FromList "Data.RRBVector" RRBVector.fromList,
+      --       FromList "Data.Vector" VB.fromList,
+      --       FromList "Data.HashMap.Strict" sampleHashMap,
+      --       FromList "Data.Sequence" Seq.fromList
+      --     ],
+      -- bgroup "map" $
+      --   maps
+      --     [ Map "Data.Vector.Persistent" fromList (Vector.Persistent.map (20 +)),
+      --       Map "Data.Vector.Persistent.Other" Vector.Persistent.Other.fromList (Vector.Persistent.Other.map (20 +)),
+      --       Map "Data.RRBVector" fromList (RRBVector.map (20 +))
+      --     ],
       bgroup "index" $
         indexers
           [ Indexer "Data.Vector.Persistent" fromList (\vec i -> fromJust $ Vector.Persistent.lookup i vec),

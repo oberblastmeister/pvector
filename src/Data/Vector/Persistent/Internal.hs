@@ -430,19 +430,19 @@ unsafeIndex# :: Vector a -> Int -> (# a #)
 unsafeIndex# vec ix
   | ix >= tailOffset vec = indexSmallArray## (tail vec) (ix .&. keyMask)
   -- no need to use keyMask here as we are at the top
-  | otherwise = go (shift vec - keyBits) (indexSmallArray (init vec) (ix !>>. shift vec))
+  | otherwise = go ix (shift vec - keyBits) (indexSmallArray (init vec) (ix !>>. shift vec))
   where
-    go 0 !node = indexSmallArray## (getDataNode node) (ix .&. keyMask)
-    go level !node = go (level - keyBits) (indexSmallArray (getInternalNode node) ix')
+    go ix 0 !node = indexSmallArray## (getDataNode node) (ix .&. keyMask)
+    go ix level !node = go ix (level - keyBits) (indexSmallArray (getInternalNode node) ix')
       where
         ix' = (ix !>>. level) .&. keyMask
-{-# INLINEABLE unsafeIndex# #-}
+{-# NOINLINE unsafeIndex# #-}
 
 lookup# :: Int -> Vector a -> (# (# #)| a #)
 lookup# ix vec
   | (fromIntegral ix :: Word) >= fromIntegral (length vec) = (# (##) | #)
   | otherwise = case Exts.inline unsafeIndex# vec ix of (# x #) -> (# | x #)
-{-# INLINEABLE lookup# #-}
+{-# NOINLINE lookup# #-}
 
 lookup :: Int -> Vector a -> Maybe a
 lookup ix vec
@@ -641,11 +641,9 @@ itraverse f vec@RootNode {size, shift, init, tail}
 
 (//) :: Vector a -> [(Int, a)] -> Vector a
 (//) vec = Foldable.foldl' (flip $ uncurry update) vec
-{-# INLINEABLE (//) #-}
 
 (><) :: Vector a -> Vector a -> Vector a
 (><) vec vec' = foldl' snoc vec vec'
-{-# INLINEABLE (><) #-}
 
 -- | Check the invariant of the vector
 invariant :: Vector a -> Bool
