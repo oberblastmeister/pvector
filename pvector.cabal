@@ -70,6 +70,7 @@ common common-options
     FunctionalDependencies,
     ExistentialQuantification,
     TypeOperators,
+    ImportQualifiedPost,
   ghc-options:
     -Wall
     -Wincomplete-record-updates
@@ -85,6 +86,7 @@ common common-options
     primitive >= 0.6.4.0 && <0.8,
     deepseq >=1.1 && <1.5,
     indexed-traversable ^>= 0.1,
+    vector-stream,
 
 library
   import: common-options

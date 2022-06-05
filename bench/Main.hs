@@ -14,6 +14,10 @@ import qualified Data.Sequence as Seq
 import qualified Data.Vector as VB
 import qualified "persistent-vector" Data.Vector.Persistent as Vector.Persistent.Other
 import qualified "pvector" Data.Vector.Persistent as Vector.Persistent
+import qualified "pvector" Data.Vector.Persistent.Internal as Vector.Persistent.Internal
+import Control.Monad.ST (runST)
+import Data.Stream.Monadic qualified as Stream
+import Data.Function ((&))
 import GHC.Exts (IsList (..))
 
 data Snocer where
@@ -32,7 +36,7 @@ data Updater where
   Updater :: NFData (f Int) => String -> ([Int] -> f Int) -> (f Int -> Int -> f Int) -> Updater
 
 data Folder where
-  Folder :: NFData (f Int) => String -> ([Int] -> f Int) -> (f Int -> Int) -> Folder
+  Folder :: (NFData (f Int), NFData a) => String -> ([Int] -> f Int) -> (f Int -> a) -> Folder
 
 sampleHashMap :: [Int] -> HashMap Int Int
 sampleHashMap is = HashMap.fromList $ fmap (\i -> (i, i)) is
@@ -68,25 +72,28 @@ main =
       --       Map "Data.Vector.Persistent.Other" Vector.Persistent.Other.fromList (Vector.Persistent.Other.map (20 +)),
       --       Map "Data.RRBVector" fromList (RRBVector.map (20 +))
       --     ],
-      bgroup "index" $
-        indexers
-          [ Indexer "Data.Vector.Persistent" fromList (\vec i -> fromJust $ Vector.Persistent.lookup i vec),
-            Indexer "Data.Vector.Persistent.Other" Vector.Persistent.Other.fromList (\vec i -> fromJust $ Vector.Persistent.Other.index vec i),
-            Indexer "Data.RRBVector" fromList (\vec i -> fromJust $ RRBVector.lookup i vec),
-            Indexer "Data.Vector" fromList (\vec i -> fromJust $ vec VB.!? i),
-            Indexer "Data.HashMap.Strict" sampleHashMap (\map i -> fromJust $ map HashMap.!? i),
-            Indexer "Data.Sequence" fromList (\seq i -> fromJust $ seq Seq.!? i)
-          ],
-      bgroup "update" $
-        updaters
-          [ Updater "Data.Vector.Persistent" fromList (\vec i -> Vector.Persistent.update i i vec),
-            Updater "Data.RRBVector" fromList (\vec i -> RRBVector.update i i vec),
-            -- be careful here, ptrEq might cause nothing to be inserted
-            Updater "Data.HashMap.Strict" sampleHashMap (\map i -> HashMap.insert i 0 map)
-          ],
+      -- bgroup "index" $
+      --   indexers
+      --     [ Indexer "Data.Vector.Persistent" fromList (\vec i -> fromJust $ Vector.Persistent.lookup i vec),
+      --       Indexer "Data.Vector.Persistent.Other" Vector.Persistent.Other.fromList (\vec i -> fromJust $ Vector.Persistent.Other.index vec i),
+      --       Indexer "Data.RRBVector" fromList (\vec i -> fromJust $ RRBVector.lookup i vec),
+      --       Indexer "Data.Vector" fromList (\vec i -> fromJust $ vec VB.!? i),
+      --       Indexer "Data.HashMap.Strict" sampleHashMap (\map i -> fromJust $ map HashMap.!? i),
+      --       Indexer "Data.Sequence" fromList (\seq i -> fromJust $ seq Seq.!? i)
+      --     ],
+      -- bgroup "update" $
+      --   updaters
+      --     [ Updater "Data.Vector.Persistent" fromList (\vec i -> Vector.Persistent.update i i vec),
+      --       Updater "Data.RRBVector" fromList (\vec i -> RRBVector.update i i vec),
+      --       -- be careful here, ptrEq might cause nothing to be inserted
+      --       Updater "Data.HashMap.Strict" sampleHashMap (\map i -> HashMap.insert i 0 map)
+      --     ],
       bgroup "fold" $
         vectorFolders
           [ Folder "normal" Vector.Persistent.fromList sum,
+            Folder "toList" Vector.Persistent.fromList (sum . Vector.Persistent.toList),
+            Folder "streamL" Vector.Persistent.fromList Vector.Persistent.Internal.streamSumL,
+            Folder "streamR" Vector.Persistent.fromList Vector.Persistent.Internal.streamSumR,
             Folder "Data.RRBVector" Vector.Persistent.fromList sum
           ]
     ]
@@ -166,7 +173,7 @@ main =
       [ env (pure $ fromList [1 .. size]) $ \vec ->
           ( bench'
               [title, "size " ++ show size]
-              (whnf func vec)
+              (nf func vec)
           )
         | size <- sizes,
           Folder title fromList func <- funcs

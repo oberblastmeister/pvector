@@ -3,37 +3,47 @@
 {-# LANGUAGE PartialTypeSignatures #-}
 {-# LANGUAGE RoleAnnotations #-}
 {-# LANGUAGE UnboxedTuples #-}
+{-# OPTIONS_GHC -ddump-simpl
+-ddump-to-file
+-dsuppress-module-prefixes
+-dsuppress-coercions
+-dsuppress-idinfo
+-O2
+#-}
 
 module Data.Vector.Persistent.Internal where
 
 import Control.Applicative (Alternative, liftA2)
-import qualified Control.Applicative
+import Control.Applicative qualified
 import Control.DeepSeq (NFData (rnf), NFData1)
-import qualified Control.DeepSeq
+import Control.DeepSeq qualified
 import Control.Monad (MonadPlus)
+import Control.Monad.Primitive (PrimMonad)
 import Control.Monad.ST (runST)
 import Data.Bits (Bits, unsafeShiftL, unsafeShiftR, (.&.))
-import qualified Data.Foldable as Foldable
+import Data.Foldable qualified as Foldable
 import Data.Foldable.WithIndex (FoldableWithIndex)
-import qualified Data.Foldable.WithIndex
+import Data.Foldable.WithIndex qualified
 import Data.Functor.Classes
   ( Show1,
     liftShowsPrec,
     showsPrec1,
     showsUnaryWith,
   )
-import Data.Functor.Identity (runIdentity)
+import Data.Functor.Identity (Identity, runIdentity)
 import Data.Functor.WithIndex (FunctorWithIndex)
-import qualified Data.Functor.WithIndex
+import Data.Functor.WithIndex qualified
 import Data.Primitive.SmallArray
-import qualified Data.Traversable as Traversable
+import Data.Stream.Monadic (Stream (Stream))
+import Data.Stream.Monadic qualified as Stream
+import Data.Traversable qualified as Traversable
 import Data.Traversable.WithIndex (TraversableWithIndex)
-import qualified Data.Traversable.WithIndex
+import Data.Traversable.WithIndex qualified
 import Data.Vector.Persistent.Internal.Array
-import qualified Data.Vector.Persistent.Internal.Array as Array
-import qualified Data.Vector.Persistent.Internal.Buffer as Buffer
+import Data.Vector.Persistent.Internal.Array qualified as Array
+import Data.Vector.Persistent.Internal.Buffer qualified as Buffer
 import GHC.Exts (IsList)
-import qualified GHC.Exts as Exts
+import GHC.Exts qualified as Exts
 import GHC.Stack (HasCallStack)
 import Prelude hiding (init, length, lookup, map, null, tail)
 
@@ -172,7 +182,7 @@ instance Show a => IsList (Vector a) where
 
 foldr :: (a -> b -> b) -> b -> Vector a -> b
 foldr f z RootNode {init, tail} =
-  let z' = (Foldable.foldr f z tail)
+  let z' = Foldable.foldr f z tail
    in Foldable.foldr go z' init
   where
     go (DataNode as) z = Foldable.foldr f z as
@@ -196,6 +206,10 @@ foldl f z RootNode {init, tail} =
     go z (DataNode as) = Foldable.foldl f z as
     go z (InternalNode ns) = Foldable.foldl go z ns
 {-# INLINE foldl #-}
+
+streamFoldl' :: (b -> a -> b) -> b -> Vector a -> b
+streamFoldl' f z = runIdentity . Stream.foldl' f z . stream
+{-# INLINE streamFoldl' #-}
 
 foldl' :: (b -> a -> b) -> b -> Vector a -> b
 foldl' f z RootNode {init, tail} =
@@ -424,7 +438,7 @@ newPath level tail = InternalNode $ singletonSmallArray $! newPath (level - keyB
 
 unsafeIndex :: Vector a -> Int -> a
 unsafeIndex vec ix | (# a #) <- Exts.inline unsafeIndex# vec ix = a
-{-# INLINEABLE unsafeIndex #-}
+{-# NOINLINE unsafeIndex #-}
 
 unsafeIndex# :: Vector a -> Int -> (# a #)
 unsafeIndex# vec ix
@@ -592,8 +606,13 @@ moduleError fun msg = error ("Data.Vector.Persistent.Internal" ++ fun ++ ':' : '
 {-# NOINLINE moduleError #-}
 
 toList :: Vector a -> [a]
-toList = Foldable.toList
+toList = pureStreamToList . stream
 {-# INLINE toList #-}
+
+-- | Convert a 'Stream' to a list
+pureStreamToList :: Stream Identity a -> [a]
+pureStreamToList s = Exts.build (\c n -> runIdentity $ Stream.foldr c n s)
+{-# INLINE pureStreamToList #-}
 
 map :: (a -> b) -> Vector a -> Vector b
 map f vec@RootNode {init, tail} = vec {tail = fmap f tail, init = fmap go init}
@@ -650,56 +669,7 @@ invariant :: Vector a -> Bool
 invariant _vec = True
 
 fromList :: [a] -> Vector a
-fromList [] = empty
-fromList [x] = singleton x
-fromList ls = case nodesTail ls of
-  (size, tail, [tree]) ->
-    RootNode {size, shift = keyBits, tail, init = pure tree}
-  (size, tail, ls') -> do
-    let iterateNodes !shift trees = case nodes $ Prelude.reverse trees of
-          [tree] -> do
-            RootNode {size, shift, tail, init = getInternalNode tree}
-          trees' -> iterateNodes (shift + keyBits) trees'
-    iterateNodes keyBits ls'
-  where
-    nodesTail trees = runST $ do
-      buffer <- Buffer.newWithCapacity nodeWidth
-      (size, buffer, acc) <-
-        Foldable.foldlM
-          ( \(!i, !buffer, acc) t -> do
-              if Buffer.length buffer == nodeWidth
-                then do
-                  result <- Buffer.freeze buffer
-                  buffer <- Buffer.push t $ Buffer.clear buffer
-                  pure (i + 1, buffer, DataNode result : acc)
-                else do
-                  buffer <- Buffer.push t buffer
-                  pure (i + 1, buffer, acc)
-          )
-          (0 :: Int, buffer, [])
-          trees
-      tail <- Buffer.unsafeFreeze buffer
-      pure (size, tail, acc)
-
-    nodes trees = runST $ do
-      buffer <- Buffer.newWithCapacity nodeWidth
-      (buffer, acc) <-
-        Foldable.foldlM
-          ( \(!buffer, acc) t ->
-              if Buffer.length buffer == nodeWidth
-                then do
-                  result <- Buffer.freeze buffer
-                  buffer <- Buffer.push t $ Buffer.clear buffer
-                  pure (buffer, InternalNode result : acc)
-                else do
-                  buffer <- Buffer.push t buffer
-                  pure (buffer, acc)
-          )
-          (buffer, [])
-          trees
-      final <- Buffer.unsafeFreeze buffer
-      pure $ InternalNode final : acc
-{-# INLINEABLE fromList #-}
+fromList = unstream . Stream.fromList
 
 keyBits :: Int
 keyBits = 5
@@ -719,3 +689,116 @@ keyMask = nodeWidth - 1
 {-# INLINE (!>>.) #-}
 
 infixl 8 !<<., !>>.
+
+unstream :: Stream Identity a -> Vector a
+unstream stream = runST $ do
+  streamToContents stream >>= \case
+    (size, tail, [tree]) ->
+      pure RootNode {size, shift = keyBits, tail, init = pure tree}
+    (size, tail, ls') -> do
+      let iterateNodes !shift trees =
+            nodes (Prelude.reverse trees) >>= \case
+              [tree] -> pure RootNode {size, shift, tail, init = getInternalNode tree}
+              trees' -> iterateNodes (shift + keyBits) trees'
+      iterateNodes keyBits ls'
+  where
+    nodes trees = do
+      buffer <- Buffer.newWithCapacity nodeWidth
+      (buffer, acc) <-
+        Foldable.foldlM
+          ( \(!buffer, acc) t ->
+              if Buffer.length buffer == nodeWidth
+                then do
+                  result <- Buffer.freeze buffer
+                  buffer <- Buffer.push t $ Buffer.clear buffer
+                  pure (buffer, InternalNode result : acc)
+                else do
+                  buffer <- Buffer.push t buffer
+                  pure (buffer, acc)
+          )
+          (buffer, [])
+          trees
+      final <- Buffer.unsafeFreeze buffer
+      pure $ InternalNode final : acc
+{-# INLINE unstream #-}
+
+streamToContents :: PrimMonad m => Stream Identity a -> m (Int, SmallArray a, [Node a])
+streamToContents (Stream step s) = do
+  buffer <- Buffer.newWithCapacity nodeWidth
+  loop (0 :: Int) buffer [] s
+  where
+    loop !size !buffer acc s = do
+      case runIdentity $ step s of
+        Stream.Yield x s' -> do
+          if Buffer.length buffer == nodeWidth
+            then do
+              result <- Buffer.freeze buffer
+              buffer <- Buffer.push x $ Buffer.clear buffer
+              loop (size + 1) buffer (DataNode result : acc) s'
+            else do
+              buffer <- Buffer.push x buffer
+              loop (size + 1) buffer acc s'
+        Stream.Skip s' -> loop size buffer acc s'
+        Stream.Done -> do
+          tail <- Buffer.unsafeFreeze buffer
+          pure (size, tail, acc)
+{-# INLINE streamToContents #-}
+
+stream :: Applicative m => Vector a -> Stream m a
+stream = streamL
+{-# INLINE stream #-}
+
+streamL :: Applicative m => Vector a -> Stream m a
+streamL RootNode {init, tail} = Stream step [(InternalNode init, 0 :: Int), (DataNode tail, 0)]
+  where
+    step [] = pure Stream.Done
+    step ((n, i) : rest) = case n of
+      InternalNode ns
+        | i >= sizeofSmallArray ns -> pure $ Stream.Skip rest
+        | otherwise -> do
+            let !(# ns' #) = indexSmallArray## ns i
+                !i' = i + 1
+            pure $ Stream.Skip $ (ns', 0) : (n, i') : rest
+      DataNode xs
+        | i >= sizeofSmallArray xs -> pure $ Stream.Skip rest
+        | otherwise -> do
+            let !(# x #) = indexSmallArray## xs i
+                !i' = i + 1
+            pure $ Stream.Yield x $ (n, i') : rest
+    {-# INLINE step #-}
+{-# INLINE streamL #-}
+
+streamR :: Applicative m => Vector a -> Stream m a
+streamR RootNode {init, tail} = Stream step [(DataNode tail, tailSize), (InternalNode init, initSize)]
+  where
+    !tailSize = sizeofSmallArray tail - 1
+    !initSize = sizeofSmallArray init - 1
+
+    step [] = pure Stream.Done
+    step ((n, i) : rest) = case n of
+      InternalNode ns
+        | i < 0 -> pure $ Stream.Skip rest
+        | otherwise -> do
+            let !(# ns' #) = indexSmallArray## ns i
+                !i' = i - 1
+                !z = nodeLen ns' - 1
+            pure $ Stream.Skip $ (ns', z) : (n, i') : rest
+      DataNode xs
+        | i < 0 -> pure $ Stream.Skip rest
+        | otherwise -> do
+            let !(# x #) = indexSmallArray## xs i
+                !i' = i - 1
+            pure $ Stream.Yield x $ (n, i') : rest
+    {-# INLINE step #-}
+{-# INLINE streamR #-}
+
+nodeLen :: Node a -> Int
+nodeLen (InternalNode arr) = sizeofSmallArray arr
+nodeLen (DataNode arr) = sizeofSmallArray arr
+{-# INLINE nodeLen #-}
+
+streamSumL :: Vector Int -> Int
+streamSumL = runIdentity . Stream.foldl' (+) 0 . streamL
+
+streamSumR :: Vector Int -> Int
+streamSumR = runIdentity . Stream.foldl' (+) 0 . streamR
