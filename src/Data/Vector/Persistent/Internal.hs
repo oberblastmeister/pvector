@@ -8,8 +8,7 @@
 -dsuppress-module-prefixes
 -dsuppress-coercions
 -dsuppress-idinfo
--O2
-#-}
+-O2 #-}
 
 module Data.Vector.Persistent.Internal where
 
@@ -322,7 +321,7 @@ pattern (:|>) :: Vector a -> a -> Vector a
 pattern vec :|> x <-
   (unsnoc -> Just (vec, x))
   where
-    vec :|> x = vec `snoc` x
+    vec :|> x = vec |> x
 
 infixl 5 :|>
 
@@ -744,11 +743,11 @@ streamToContents (Stream step s) = do
           pure (size, tail, acc)
 {-# INLINE streamToContents #-}
 
-stream :: Applicative m => Vector a -> Stream m a
+stream :: Monad m => Vector a -> Stream m a
 stream = streamL
 {-# INLINE stream #-}
 
-streamL :: Applicative m => Vector a -> Stream m a
+streamL :: Monad m => Vector a -> Stream m a
 streamL RootNode {init, tail} = Stream step [(InternalNode init, 0 :: Int), (DataNode tail, 0)]
   where
     step [] = pure Stream.Done
@@ -768,7 +767,7 @@ streamL RootNode {init, tail} = Stream step [(InternalNode init, 0 :: Int), (Dat
     {-# INLINE step #-}
 {-# INLINE streamL #-}
 
-streamR :: Applicative m => Vector a -> Stream m a
+streamR :: Monad m => Vector a -> Stream m a
 streamR RootNode {init, tail} = Stream step [(DataNode tail, tailSize), (InternalNode init, initSize)]
   where
     !tailSize = sizeofSmallArray tail - 1
@@ -779,10 +778,15 @@ streamR RootNode {init, tail} = Stream step [(DataNode tail, tailSize), (Interna
       InternalNode ns
         | i < 0 -> pure $ Stream.Skip rest
         | otherwise -> do
-            let !(# ns' #) = indexSmallArray## ns i
+            let !(# n' #) = indexSmallArray## ns i
                 !i' = i - 1
-                !z = nodeLen ns' - 1
-            pure $ Stream.Skip $ (ns', z) : (n, i') : rest
+            pure $ case n' of
+              InternalNode ns -> do
+                let !z = sizeofSmallArray ns - 1
+                Stream.Skip $ (n', z) : (n, i') : rest
+              DataNode xs -> do
+                let !z = sizeofSmallArray xs - 1
+                Stream.Skip $ (n', z) : (n, i') : rest
       DataNode xs
         | i < 0 -> pure $ Stream.Skip rest
         | otherwise -> do
@@ -791,14 +795,3 @@ streamR RootNode {init, tail} = Stream step [(DataNode tail, tailSize), (Interna
             pure $ Stream.Yield x $ (n, i') : rest
     {-# INLINE step #-}
 {-# INLINE streamR #-}
-
-nodeLen :: Node a -> Int
-nodeLen (InternalNode arr) = sizeofSmallArray arr
-nodeLen (DataNode arr) = sizeofSmallArray arr
-{-# INLINE nodeLen #-}
-
-streamSumL :: Vector Int -> Int
-streamSumL = runIdentity . Stream.foldl' (+) 0 . streamL
-
-streamSumR :: Vector Int -> Int
-streamSumR = runIdentity . Stream.foldl' (+) 0 . streamR

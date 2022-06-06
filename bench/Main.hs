@@ -3,21 +3,21 @@
 module Main where
 
 import Control.DeepSeq (NFData)
+import Control.Monad.ST (runST)
 import Criterion.Main
 import Data.Foldable (foldl')
-import Data.HashMap.Strict (HashMap)
-import qualified Data.HashMap.Strict as HashMap
-import qualified Data.List as List
-import Data.Maybe (fromJust)
-import qualified Data.RRBVector as RRBVector
-import qualified Data.Sequence as Seq
-import qualified Data.Vector as VB
-import qualified "persistent-vector" Data.Vector.Persistent as Vector.Persistent.Other
-import qualified "pvector" Data.Vector.Persistent as Vector.Persistent
-import qualified "pvector" Data.Vector.Persistent.Internal as Vector.Persistent.Internal
-import Control.Monad.ST (runST)
-import Data.Stream.Monadic qualified as Stream
 import Data.Function ((&))
+import Data.HashMap.Strict (HashMap)
+import Data.HashMap.Strict qualified as HashMap
+import Data.List qualified as List
+import Data.Maybe (fromJust)
+import Data.RRBVector qualified as RRBVector
+import Data.Sequence qualified as Seq
+import Data.Stream.Monadic qualified as Stream
+import Data.Vector qualified as VB
+import "persistent-vector" Data.Vector.Persistent qualified as Vector.Persistent.Other
+import "pvector" Data.Vector.Persistent qualified as Vector.Persistent
+import "pvector" Data.Vector.Persistent.Internal qualified as Vector.Persistent.Internal
 import GHC.Exts (IsList (..))
 
 data Snocer where
@@ -48,16 +48,15 @@ main :: IO ()
 main =
   defaultMainWith
     defaultConfig
-    [
-    -- bgroup "snoc" $
-    --     snocs
-    --       [ Snocer "Data.Vector.Persistent" fromList Vector.Persistent.snoc,
-    --         Snocer "Data.Vector.Persistent.Other" Vector.Persistent.Other.fromList Vector.Persistent.Other.snoc
-    --         -- Snocer "Data.RRBVector" fromList (RRBVector.|>),
-    --         -- Snocer "Data.Vector" fromList VB.snoc,
-    --         -- Snocer "Data.HashMap.Strict" sampleHashMap snocHashMap,
-    --         -- Snocer "Data.Sequence" fromList (Seq.|>)
-    --       ],
+    [ -- bgroup "snoc" $
+      --     snocs
+      --       [ Snocer "Data.Vector.Persistent" fromList Vector.Persistent.snoc,
+      --         Snocer "Data.Vector.Persistent.Other" Vector.Persistent.Other.fromList Vector.Persistent.Other.snoc
+      --         -- Snocer "Data.RRBVector" fromList (RRBVector.|>),
+      --         -- Snocer "Data.Vector" fromList VB.snoc,
+      --         -- Snocer "Data.HashMap.Strict" sampleHashMap snocHashMap,
+      --         -- Snocer "Data.Sequence" fromList (Seq.|>)
+      --       ],
       -- bgroup "fromList" $
       --   fromLists
       --     [ FromList "Data.Vector.Persistent" Vector.Persistent.fromList,
@@ -90,8 +89,8 @@ main =
       --     ],
       bgroup "fold" $
         vectorFolders
-          [ Folder "normal" Vector.Persistent.fromList sum,
-            Folder "toList" Vector.Persistent.fromList (sum . Vector.Persistent.toList),
+          [ -- Folder "normal" Vector.Persistent.fromList sum,
+            -- Folder "toList" Vector.Persistent.fromList (sum . Vector.Persistent.toList),
             Folder "streamL" Vector.Persistent.fromList Vector.Persistent.Internal.streamSumL,
             Folder "streamR" Vector.Persistent.fromList Vector.Persistent.Internal.streamSumR,
             Folder "Data.RRBVector" Vector.Persistent.fromList sum
@@ -184,3 +183,9 @@ sizes = take 4 allSizes
 
 allSizes :: [Int]
 allSizes = [10 ^ i | i <- [1 :: Int ..]]
+
+streamSumL :: Vector Int -> Int
+streamSumL = runIdentity . Stream.foldl' (+) 0 . streamL
+
+streamSumR :: Vector Int -> Int
+streamSumR = runIdentity . Stream.foldl' (+) 0 . streamR
