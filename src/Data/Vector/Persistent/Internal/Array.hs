@@ -1,12 +1,6 @@
 {-# LANGUAGE MagicHash #-}
 {-# LANGUAGE UnboxedSums #-}
 {-# LANGUAGE UnboxedTuples #-}
-{-# OPTIONS_GHC -ddump-simpl
--ddump-to-file
--dsuppress-module-prefixes
--dsuppress-coercions
--dsuppress-idinfo
--O2 #-}
 
 module Data.Vector.Persistent.Internal.Array
   ( Array,
@@ -30,6 +24,7 @@ module Data.Vector.Persistent.Internal.Array
     imapStepSmallArray',
     itraverseStepSmallArray,
     modifySmallArray#,
+    mapSmallArray#,
   )
 where
 
@@ -45,6 +40,16 @@ import GHC.Exts (SmallMutableArray#)
 type Array = SmallArray
 
 type MArray = SmallMutableArray
+
+mapSmallArray# :: (a -> (# b #)) -> SmallArray a -> SmallArray b
+mapSmallArray# f sa = createSmallArray (length sa) (error "mapSmallArray#") $ \smb -> do
+  let go i =
+        when (i < length sa) $ do
+          x <- indexSmallArrayM sa i
+          let !(# y #) = f x
+          writeSmallArray smb i y *> go (i + 1)
+  go 0
+{-# INLINE mapSmallArray# #-}
 
 nullSmallArray :: SmallArray a -> Bool
 nullSmallArray arr = sizeofSmallArray arr == 0

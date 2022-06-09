@@ -70,6 +70,7 @@ common common-options
     FunctionalDependencies,
     ExistentialQuantification,
     TypeOperators,
+    ImportQualifiedPost,
   ghc-options:
     -Wall
     -Wincomplete-record-updates
@@ -85,6 +86,7 @@ common common-options
     primitive >= 0.6.4.0 && <0.8,
     deepseq >=1.1 && <1.5,
     indexed-traversable ^>= 0.1,
+    vector-stream,
 
 library
   import: common-options
@@ -98,12 +100,15 @@ library
     Data.Vector.Persistent.Internal
     Data.Vector.Persistent.Internal.Buffer
     Data.Vector.Persistent.Internal.Array
+    Data.Vector.Persistent.Internal.CoercibleUtils
   if flag(inspection)
     build-depends:
       inspection-testing ^>= 0.4.6.0,
-  ghc-options: -ddump-simpl -ddump-stg-final -ddump-cmm -ddump-asm -ddump-to-file
-  ghc-options: -dsuppress-coercions -dsuppress-unfoldings -dsuppress-module-prefixes
-  ghc-options: -dsuppress-uniques -dsuppress-timestamps
+
+  -- uncomment to inspect generated code
+  -- ghc-options: -ddump-simpl -ddump-stg-final -ddump-cmm -ddump-asm -ddump-to-file
+  -- ghc-options: -dsuppress-coercions -dsuppress-unfoldings -dsuppress-module-prefixes
+  -- ghc-options: -dsuppress-uniques -dsuppress-timestamps
 
 common rtsopts
   ghc-options:

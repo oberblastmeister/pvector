@@ -1,11 +1,5 @@
 {-# LANGUAGE MagicHash #-}
 {-# LANGUAGE UnboxedTuples #-}
-{-# OPTIONS_GHC -ddump-simpl
--ddump-to-file
--dsuppress-module-prefixes
--dsuppress-idinfo 
--dsuppress-coercions
--O2 #-}
 
 module Data.Vector.Persistent.Strict.Internal
   ( snoc,

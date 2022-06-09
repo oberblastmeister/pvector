@@ -3,17 +3,21 @@
 module Main where
 
 import Control.DeepSeq (NFData)
+import Control.Monad.ST (runST)
 import Criterion.Main
 import Data.Foldable (foldl')
+import Data.Function ((&))
 import Data.HashMap.Strict (HashMap)
-import qualified Data.HashMap.Strict as HashMap
-import qualified Data.List as List
+import Data.HashMap.Strict qualified as HashMap
+import Data.List qualified as List
 import Data.Maybe (fromJust)
-import qualified Data.RRBVector as RRBVector
-import qualified Data.Sequence as Seq
-import qualified Data.Vector as VB
-import qualified "persistent-vector" Data.Vector.Persistent as Vector.Persistent.Other
-import qualified "pvector" Data.Vector.Persistent as Vector.Persistent
+import Data.RRBVector qualified as RRBVector
+import Data.Sequence qualified as Seq
+import Data.Stream.Monadic qualified as Stream
+import Data.Vector qualified as VB
+import "persistent-vector" Data.Vector.Persistent qualified as Vector.Persistent.Other
+import "pvector" Data.Vector.Persistent qualified as Vector.Persistent
+import "pvector" Data.Vector.Persistent.Internal qualified as Vector.Persistent.Internal
 import GHC.Exts (IsList (..))
 
 data Snocer where
@@ -32,7 +36,7 @@ data Updater where
   Updater :: NFData (f Int) => String -> ([Int] -> f Int) -> (f Int -> Int -> f Int) -> Updater
 
 data Folder where
-  Folder :: NFData (f Int) => String -> ([Int] -> f Int) -> (f Int -> Int) -> Folder
+  Folder :: (NFData (f Int), NFData a) => String -> ([Int] -> f Int) -> (f Int -> a) -> Folder
 
 sampleHashMap :: [Int] -> HashMap Int Int
 sampleHashMap is = HashMap.fromList $ fmap (\i -> (i, i)) is
@@ -44,30 +48,29 @@ main :: IO ()
 main =
   defaultMainWith
     defaultConfig
-    [
-    -- bgroup "snoc" $
-    --     snocs
-    --       [ Snocer "Data.Vector.Persistent" fromList Vector.Persistent.snoc,
-    --         Snocer "Data.Vector.Persistent.Other" Vector.Persistent.Other.fromList Vector.Persistent.Other.snoc
-    --         -- Snocer "Data.RRBVector" fromList (RRBVector.|>),
-    --         -- Snocer "Data.Vector" fromList VB.snoc,
-    --         -- Snocer "Data.HashMap.Strict" sampleHashMap snocHashMap,
-    --         -- Snocer "Data.Sequence" fromList (Seq.|>)
-    --       ],
-      -- bgroup "fromList" $
-      --   fromLists
-      --     [ FromList "Data.Vector.Persistent" Vector.Persistent.fromList,
-      --       FromList "Data.RRBVector" RRBVector.fromList,
-      --       FromList "Data.Vector" VB.fromList,
-      --       FromList "Data.HashMap.Strict" sampleHashMap,
-      --       FromList "Data.Sequence" Seq.fromList
-      --     ],
-      -- bgroup "map" $
-      --   maps
-      --     [ Map "Data.Vector.Persistent" fromList (Vector.Persistent.map (20 +)),
-      --       Map "Data.Vector.Persistent.Other" Vector.Persistent.Other.fromList (Vector.Persistent.Other.map (20 +)),
-      --       Map "Data.RRBVector" fromList (RRBVector.map (20 +))
-      --     ],
+    [ bgroup "snoc" $
+        snocs
+          [ Snocer "Data.Vector.Persistent" fromList Vector.Persistent.snoc,
+            Snocer "Data.Vector.Persistent.Other" Vector.Persistent.Other.fromList Vector.Persistent.Other.snoc,
+            Snocer "Data.RRBVector" fromList (RRBVector.|>),
+            Snocer "Data.Vector" fromList VB.snoc,
+            Snocer "Data.HashMap.Strict" sampleHashMap snocHashMap,
+            Snocer "Data.Sequence" fromList (Seq.|>)
+          ],
+      bgroup "fromList" $
+        fromLists
+          [ FromList "Data.Vector.Persistent" Vector.Persistent.fromList,
+            FromList "Data.RRBVector" RRBVector.fromList,
+            FromList "Data.Vector" VB.fromList,
+            FromList "Data.HashMap.Strict" sampleHashMap,
+            FromList "Data.Sequence" Seq.fromList
+          ],
+      bgroup "map" $
+        maps
+          [ Map "Data.Vector.Persistent" fromList (Vector.Persistent.map (20 +)),
+            Map "Data.Vector.Persistent.Other" Vector.Persistent.Other.fromList (Vector.Persistent.Other.map (20 +)),
+            Map "Data.RRBVector" fromList (RRBVector.map (20 +))
+          ],
       bgroup "index" $
         indexers
           [ Indexer "Data.Vector.Persistent" fromList (\vec i -> fromJust $ Vector.Persistent.lookup i vec),
@@ -87,7 +90,19 @@ main =
       bgroup "fold" $
         vectorFolders
           [ Folder "normal" Vector.Persistent.fromList sum,
-            Folder "Data.RRBVector" Vector.Persistent.fromList sum
+            -- Folder "toList" Vector.Persistent.fromList (sum . Vector.Persistent.toList),
+            -- Folder "streamL" Vector.Persistent.fromList Vector.Persistent.Internal.streamSumL,
+            -- Folder "streamR" Vector.Persistent.fromList Vector.Persistent.Internal.streamSumR,
+            Folder "Data.RRBVector" RRBVector.fromList sum
+          ],
+      bgroup "equality" $
+        vectorFolders
+          [ Folder "normal" Vector.Persistent.fromList (\x -> Vector.Persistent.Internal.persistentVectorEq x x),
+            Folder "stream" Vector.Persistent.fromList (\x -> Vector.Persistent.Internal.persistentVectorStreamEq x x)
+          ],
+      bgroup "compare" $
+        vectorFolders
+          [ Folder "normal" Vector.Persistent.fromList Vector.Persistent.Internal.persistentVectorCompare
           ]
     ]
   where
@@ -166,7 +181,7 @@ main =
       [ env (pure $ fromList [1 .. size]) $ \vec ->
           ( bench'
               [title, "size " ++ show size]
-              (whnf func vec)
+              (nf func vec)
           )
         | size <- sizes,
           Folder title fromList func <- funcs
@@ -177,3 +192,9 @@ sizes = take 4 allSizes
 
 allSizes :: [Int]
 allSizes = [10 ^ i | i <- [1 :: Int ..]]
+
+-- streamSumL :: Vector.Persistent.Vector Int -> Int
+-- streamSumL = runIdentity . Stream.foldl' (+) 0 . streamL
+
+-- streamSumR :: Vector.Persistent.Vector Int -> Int
+-- streamSumR = runIdentity . Stream.foldl' (+) 0 . streamR
