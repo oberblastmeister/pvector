@@ -3,12 +3,6 @@
 {-# LANGUAGE PartialTypeSignatures #-}
 {-# LANGUAGE RoleAnnotations #-}
 {-# LANGUAGE UnboxedTuples #-}
-{-# OPTIONS_GHC -ddump-simpl
--ddump-to-file
--dsuppress-module-prefixes
--dsuppress-coercions
--dsuppress-idinfo
--O2 #-}
 
 module Data.Vector.Persistent.Internal where
 
@@ -564,6 +558,7 @@ map f vec@RootNode {init, tail} = vec {tail = fmap f tail, init = mapSmallArray'
     go (DataNode as) = DataNode $ fmap f as
     go (InternalNode ns) = InternalNode $ mapSmallArray' go ns
 {-# INLINE map #-}
+
 
 imap :: (Int -> a -> b) -> Vector a -> Vector b
 imap f vec@RootNode {size, shift, init, tail}
