@@ -21,26 +21,23 @@ import Control.Monad.Primitive (PrimMonad)
 import Control.Monad.ST (runST)
 import Data.Bits (Bits, unsafeShiftL, unsafeShiftR, (.&.))
 import Data.Foldable qualified as Foldable
-import Data.Foldable.WithIndex (FoldableWithIndex)
-import Data.Foldable.WithIndex qualified
 import Data.Functor.Classes
   ( Show1,
     liftShowsPrec,
     showsPrec1,
     showsUnaryWith,
   )
-import Data.Functor.Identity (Identity, runIdentity)
+import Data.Functor.Identity (Identity (..))
 import Data.Functor.WithIndex (FunctorWithIndex)
 import Data.Functor.WithIndex qualified
 import Data.Primitive.SmallArray
 import Data.Stream.Monadic (Stream (Stream))
 import Data.Stream.Monadic qualified as Stream
 import Data.Traversable qualified as Traversable
-import Data.Traversable.WithIndex (TraversableWithIndex)
-import Data.Traversable.WithIndex qualified
 import Data.Vector.Persistent.Internal.Array
 import Data.Vector.Persistent.Internal.Array qualified as Array
 import Data.Vector.Persistent.Internal.Buffer qualified as Buffer
+import Data.Vector.Persistent.Internal.CoercibleUtils
 import GHC.Exts (IsList)
 import GHC.Exts qualified as Exts
 import GHC.Stack (HasCallStack)
@@ -102,20 +99,6 @@ instance Foldable Vector where
 instance Traversable Vector where
   traverse = Data.Vector.Persistent.Internal.traverse
   {-# INLINE traverse #-}
-
-instance FoldableWithIndex Int Vector where
-  ifoldr = Data.Vector.Persistent.Internal.ifoldr
-  {-# INLINE ifoldr #-}
-  ifoldl = Data.Vector.Persistent.Internal.ifoldl
-  {-# INLINE ifoldl #-}
-  ifoldr' = Data.Vector.Persistent.Internal.ifoldr'
-  {-# INLINE ifoldr' #-}
-  ifoldl' = Data.Vector.Persistent.Internal.ifoldl'
-  {-# INLINE ifoldl' #-}
-
-instance TraversableWithIndex Int Vector where
-  itraverse = Data.Vector.Persistent.Internal.itraverse
-  {-# INLINE itraverse #-}
 
 instance Semigroup (Vector a) where
   (<>) = (><)
@@ -180,100 +163,61 @@ instance Show a => IsList (Vector a) where
   {-# INLINE toList #-}
 
 foldr :: (a -> b -> b) -> b -> Vector a -> b
-foldr f z RootNode {init, tail} =
-  let z' = Foldable.foldr f z tail
-   in Foldable.foldr go z' init
-  where
-    go (DataNode as) z = Foldable.foldr f z as
-    go (InternalNode ns) z = Foldable.foldr go z ns
+foldr f z = runIdentity #. Stream.foldr f z . streamL
 {-# INLINE foldr #-}
 
 foldr' :: (a -> b -> b) -> b -> Vector a -> b
-foldr' f z RootNode {init, tail} =
-  let !z' = Foldable.foldr' f z tail
-   in Foldable.foldr' go z' init
-  where
-    go (DataNode as) !z = Foldable.foldr' f z as
-    go (InternalNode ns) !z = Foldable.foldr' go z ns
+foldr' f z = runIdentity #. Stream.foldl' (flip f) z . streamR
 {-# INLINE foldr' #-}
 
 foldl :: (b -> a -> b) -> b -> Vector a -> b
-foldl f z RootNode {init, tail} =
-  let z' = Foldable.foldl go z init
-   in Foldable.foldl f z' tail
-  where
-    go z (DataNode as) = Foldable.foldl f z as
-    go z (InternalNode ns) = Foldable.foldl go z ns
+foldl f z = runIdentity #. Stream.foldr (flip f) z . streamR
 {-# INLINE foldl #-}
 
-streamFoldl' :: (b -> a -> b) -> b -> Vector a -> b
-streamFoldl' f z = runIdentity . Stream.foldl' f z . stream
-{-# INLINE streamFoldl' #-}
-
 foldl' :: (b -> a -> b) -> b -> Vector a -> b
-foldl' f z RootNode {init, tail} =
-  let !z' = Foldable.foldl go z init
-   in Foldable.foldl f z' tail
-  where
-    go !z (DataNode as) = Foldable.foldl' f z as
-    go !z (InternalNode ns) = Foldable.foldl' go z ns
+foldl' f z = runIdentity #. Stream.foldl' f z . streamL
 {-# INLINE foldl' #-}
 
 ifoldr :: (Int -> a -> b -> b) -> b -> Vector a -> b
-ifoldr f z vec@RootNode {size, shift, init, tail}
-  | size == 0 = z
-  | otherwise =
-      let z' = ifoldrStepSmallArray (tailOffset vec) 1 f z tail
-       in ifoldrStepSmallArray 0 (1 !<<. shift) (go $! shift - keyBits) z' init
-  where
-    go _shift i0 (DataNode as) z = ifoldrStepSmallArray i0 1 f z as
-    go shift i0 (InternalNode ns) z = ifoldrStepSmallArray i0 (1 !<<. shift) (go $! shift - keyBits) z ns
+ifoldr f z = runIdentity #. Stream.foldr (uncurry f) z . istreamL
 {-# INLINE ifoldr #-}
 
 ifoldl :: (Int -> b -> a -> b) -> b -> Vector a -> b
-ifoldl f z vec@RootNode {size, shift, init, tail}
-  | size == 0 = z
-  | otherwise =
-      let z' = ifoldlStepSmallArray 0 (1 !<<. shift) (go $! shift - keyBits) z init
-       in ifoldlStepSmallArray (tailOffset vec) 1 f z' tail
-  where
-    go _shift i0 z (DataNode as) = ifoldlStepSmallArray i0 1 f z as
-    go shift i0 z (InternalNode ns) = ifoldlStepSmallArray i0 (1 !<<. shift) (go $! shift - keyBits) z ns
+ifoldl f z = runIdentity #. Stream.foldr (\(i, x) y -> f i y x) z . istreamR
 {-# INLINE ifoldl #-}
 
 ifoldr' :: (Int -> a -> b -> b) -> b -> Vector a -> b
-ifoldr' f z vec@RootNode {size, shift, init, tail}
-  | size == 0 = z
-  | otherwise =
-      let !z' = ifoldrStepSmallArray' (tailOffset vec) 1 f z tail
-       in ifoldrStepSmallArray' 0 (1 !<<. shift) (go $! shift - keyBits) z' init
-  where
-    go _shift i0 (DataNode as) !z = ifoldrStepSmallArray' i0 1 f z as
-    go shift i0 (InternalNode ns) !z = ifoldrStepSmallArray' i0 (1 !<<. shift) (go $! shift - keyBits) z ns
+ifoldr' f z = runIdentity #. Stream.foldl' (\y (i, x) -> f i x y) z . istreamR
 {-# INLINE ifoldr' #-}
 
 ifoldl' :: (Int -> b -> a -> b) -> b -> Vector a -> b
-ifoldl' f z vec@RootNode {size, shift, init, tail}
-  | size == 0 = z
-  | otherwise =
-      let !z' = ifoldlStepSmallArray' 0 (1 !<<. shift) (go $! shift - keyBits) z init
-       in ifoldlStepSmallArray' (tailOffset vec) 1 f z' tail
-  where
-    go _shift i0 !z (DataNode as) = ifoldlStepSmallArray' i0 1 f z as
-    go shift i0 !z (InternalNode ns) = ifoldlStepSmallArray' i0 (1 !<<. shift) (go $! shift - keyBits) z ns
+ifoldl' f z = runIdentity #. Stream.foldl' (\y (i, x) -> f i y x) z . istreamL
 {-# INLINE ifoldl' #-}
+
+persistentVectorStreamEq :: Eq a => Vector a -> Vector a -> Bool
+persistentVectorStreamEq
+  v1@RootNode {size, shift}
+  v2@RootNode {size = size', shift = shift'} =
+    size == size'
+      && ( size == 0
+             || ( shift == shift'
+                    && runIdentity (Stream.and (Stream.zipWith (==) (streamL v1) (streamL v2)))
+                )
+         )
+{-# INLINEABLE persistentVectorStreamEq #-}
 
 persistentVectorEq :: Eq a => Vector a -> Vector a -> Bool
 persistentVectorEq
   RootNode {size, shift, init, tail}
   RootNode {size = size', shift = shift', init = init', tail = tail'} =
     size == size' && (size == 0 || (shift == shift' && tail == tail' && init == init'))
-{-# INLINE persistentVectorEq #-}
+{-# INLINEABLE persistentVectorEq #-}
 
 nodeEq :: Eq a => Node a -> Node a -> Bool
 nodeEq (InternalNode ns) (InternalNode ns') = ns == ns'
 nodeEq (DataNode as) (DataNode as') = as == as'
 nodeEq _ _ = False
+{-# INLINEABLE nodeEq #-}
 
 persistentVectorCompare :: Ord a => Vector a -> Vector a -> Ordering
 persistentVectorCompare
@@ -283,13 +227,14 @@ persistentVectorCompare
       <> if size == 0
         then EQ
         else compare init init' <> compare tail tail'
-{-# INLINE persistentVectorCompare #-}
+{-# INLINEABLE persistentVectorCompare #-}
 
 nodeCompare :: Ord a => Node a -> Node a -> Ordering
 nodeCompare (DataNode as) (DataNode as') = compare as as'
 nodeCompare (InternalNode ns) (InternalNode ns') = compare ns ns'
 nodeCompare (DataNode _) (InternalNode _) = LT
 nodeCompare (InternalNode _) (DataNode _) = GT
+{-# INLINEABLE nodeCompare #-}
 
 singleton :: a -> Vector a
 singleton a = RootNode {size = 1, shift = keyBits, tail = singletonSmallArray a, init = emptySmallArray}
@@ -605,7 +550,7 @@ moduleError fun msg = error ("Data.Vector.Persistent.Internal" ++ fun ++ ':' : '
 {-# NOINLINE moduleError #-}
 
 toList :: Vector a -> [a]
-toList = pureStreamToList . stream
+toList = pureStreamToList . streamL
 {-# INLINE toList #-}
 
 -- | Convert a 'Stream' to a list
@@ -614,10 +559,10 @@ pureStreamToList s = Exts.build (\c n -> runIdentity $ Stream.foldr c n s)
 {-# INLINE pureStreamToList #-}
 
 map :: (a -> b) -> Vector a -> Vector b
-map f vec@RootNode {init, tail} = vec {tail = fmap f tail, init = fmap go init}
+map f vec@RootNode {init, tail} = vec {tail = fmap f tail, init = mapSmallArray' go init}
   where
     go (DataNode as) = DataNode $ fmap f as
-    go (InternalNode ns) = InternalNode $ fmap go ns
+    go (InternalNode ns) = InternalNode $ mapSmallArray' go ns
 {-# INLINE map #-}
 
 imap :: (Int -> a -> b) -> Vector a -> Vector b
@@ -658,10 +603,10 @@ itraverse f vec@RootNode {size, shift, init, tail}
 {-# INLINE itraverse #-}
 
 (//) :: Vector a -> [(Int, a)] -> Vector a
-(//) vec = Foldable.foldl' (flip $ uncurry update) vec
+(//) = Exts.inline Foldable.foldl' $ flip $ uncurry update
 
 (><) :: Vector a -> Vector a -> Vector a
-(><) vec vec' = foldl' snoc vec vec'
+(><) = Exts.inline foldl' snoc
 
 -- | Check the invariant of the vector
 invariant :: Vector a -> Bool
@@ -743,10 +688,6 @@ streamToContents (Stream step s) = do
           pure (size, tail, acc)
 {-# INLINE streamToContents #-}
 
-stream :: Monad m => Vector a -> Stream m a
-stream = streamL
-{-# INLINE stream #-}
-
 streamL :: Monad m => Vector a -> Stream m a
 streamL RootNode {init, tail} = Stream step [(InternalNode init, 0 :: Int), (DataNode tail, 0)]
   where
@@ -795,3 +736,11 @@ streamR RootNode {init, tail} = Stream step [(DataNode tail, tailSize), (Interna
             pure $ Stream.Yield x $ (n, i') : rest
     {-# INLINE step #-}
 {-# INLINE streamR #-}
+
+istreamL :: Monad m => Vector a -> Stream m (Int, a)
+istreamL = Stream.indexed . streamL
+{-# INLINE istreamL #-}
+
+istreamR :: Monad m => Vector a -> Stream m (Int, a)
+istreamR vec = Stream.indexedR (length vec) $ streamR vec
+{-# INLINE istreamR #-}

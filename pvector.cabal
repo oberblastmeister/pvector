@@ -100,6 +100,7 @@ library
     Data.Vector.Persistent.Internal
     Data.Vector.Persistent.Internal.Buffer
     Data.Vector.Persistent.Internal.Array
+    Data.Vector.Persistent.Internal.CoercibleUtils
   if flag(inspection)
     build-depends:
       inspection-testing ^>= 0.4.6.0,

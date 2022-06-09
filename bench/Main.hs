@@ -48,52 +48,61 @@ main :: IO ()
 main =
   defaultMainWith
     defaultConfig
-    [ -- bgroup "snoc" $
-      --     snocs
-      --       [ Snocer "Data.Vector.Persistent" fromList Vector.Persistent.snoc,
-      --         Snocer "Data.Vector.Persistent.Other" Vector.Persistent.Other.fromList Vector.Persistent.Other.snoc
-      --         -- Snocer "Data.RRBVector" fromList (RRBVector.|>),
-      --         -- Snocer "Data.Vector" fromList VB.snoc,
-      --         -- Snocer "Data.HashMap.Strict" sampleHashMap snocHashMap,
-      --         -- Snocer "Data.Sequence" fromList (Seq.|>)
-      --       ],
-      -- bgroup "fromList" $
-      --   fromLists
-      --     [ FromList "Data.Vector.Persistent" Vector.Persistent.fromList,
-      --       FromList "Data.RRBVector" RRBVector.fromList,
-      --       FromList "Data.Vector" VB.fromList,
-      --       FromList "Data.HashMap.Strict" sampleHashMap,
-      --       FromList "Data.Sequence" Seq.fromList
-      --     ],
-      -- bgroup "map" $
-      --   maps
-      --     [ Map "Data.Vector.Persistent" fromList (Vector.Persistent.map (20 +)),
-      --       Map "Data.Vector.Persistent.Other" Vector.Persistent.Other.fromList (Vector.Persistent.Other.map (20 +)),
-      --       Map "Data.RRBVector" fromList (RRBVector.map (20 +))
-      --     ],
-      -- bgroup "index" $
-      --   indexers
-      --     [ Indexer "Data.Vector.Persistent" fromList (\vec i -> fromJust $ Vector.Persistent.lookup i vec),
-      --       Indexer "Data.Vector.Persistent.Other" Vector.Persistent.Other.fromList (\vec i -> fromJust $ Vector.Persistent.Other.index vec i),
-      --       Indexer "Data.RRBVector" fromList (\vec i -> fromJust $ RRBVector.lookup i vec),
-      --       Indexer "Data.Vector" fromList (\vec i -> fromJust $ vec VB.!? i),
-      --       Indexer "Data.HashMap.Strict" sampleHashMap (\map i -> fromJust $ map HashMap.!? i),
-      --       Indexer "Data.Sequence" fromList (\seq i -> fromJust $ seq Seq.!? i)
-      --     ],
-      -- bgroup "update" $
-      --   updaters
-      --     [ Updater "Data.Vector.Persistent" fromList (\vec i -> Vector.Persistent.update i i vec),
-      --       Updater "Data.RRBVector" fromList (\vec i -> RRBVector.update i i vec),
-      --       -- be careful here, ptrEq might cause nothing to be inserted
-      --       Updater "Data.HashMap.Strict" sampleHashMap (\map i -> HashMap.insert i 0 map)
-      --     ],
+    [ bgroup "snoc" $
+        snocs
+          [ Snocer "Data.Vector.Persistent" fromList Vector.Persistent.snoc,
+            Snocer "Data.Vector.Persistent.Other" Vector.Persistent.Other.fromList Vector.Persistent.Other.snoc,
+            Snocer "Data.RRBVector" fromList (RRBVector.|>),
+            Snocer "Data.Vector" fromList VB.snoc,
+            Snocer "Data.HashMap.Strict" sampleHashMap snocHashMap,
+            Snocer "Data.Sequence" fromList (Seq.|>)
+          ],
+      bgroup "fromList" $
+        fromLists
+          [ FromList "Data.Vector.Persistent" Vector.Persistent.fromList,
+            FromList "Data.RRBVector" RRBVector.fromList,
+            FromList "Data.Vector" VB.fromList,
+            FromList "Data.HashMap.Strict" sampleHashMap,
+            FromList "Data.Sequence" Seq.fromList
+          ],
+      bgroup "map" $
+        maps
+          [ Map "Data.Vector.Persistent" fromList (Vector.Persistent.map (20 +)),
+            Map "Data.Vector.Persistent.Other" Vector.Persistent.Other.fromList (Vector.Persistent.Other.map (20 +)),
+            Map "Data.RRBVector" fromList (RRBVector.map (20 +))
+          ],
+      bgroup "index" $
+        indexers
+          [ Indexer "Data.Vector.Persistent" fromList (\vec i -> fromJust $ Vector.Persistent.lookup i vec),
+            Indexer "Data.Vector.Persistent.Other" Vector.Persistent.Other.fromList (\vec i -> fromJust $ Vector.Persistent.Other.index vec i),
+            Indexer "Data.RRBVector" fromList (\vec i -> fromJust $ RRBVector.lookup i vec),
+            Indexer "Data.Vector" fromList (\vec i -> fromJust $ vec VB.!? i),
+            Indexer "Data.HashMap.Strict" sampleHashMap (\map i -> fromJust $ map HashMap.!? i),
+            Indexer "Data.Sequence" fromList (\seq i -> fromJust $ seq Seq.!? i)
+          ],
+      bgroup "update" $
+        updaters
+          [ Updater "Data.Vector.Persistent" fromList (\vec i -> Vector.Persistent.update i i vec),
+            Updater "Data.RRBVector" fromList (\vec i -> RRBVector.update i i vec),
+            -- be careful here, ptrEq might cause nothing to be inserted
+            Updater "Data.HashMap.Strict" sampleHashMap (\map i -> HashMap.insert i 0 map)
+          ],
       bgroup "fold" $
         vectorFolders
-          [ -- Folder "normal" Vector.Persistent.fromList sum,
+          [ Folder "normal" Vector.Persistent.fromList sum,
             -- Folder "toList" Vector.Persistent.fromList (sum . Vector.Persistent.toList),
-            Folder "streamL" Vector.Persistent.fromList Vector.Persistent.Internal.streamSumL,
-            Folder "streamR" Vector.Persistent.fromList Vector.Persistent.Internal.streamSumR,
-            Folder "Data.RRBVector" Vector.Persistent.fromList sum
+            -- Folder "streamL" Vector.Persistent.fromList Vector.Persistent.Internal.streamSumL,
+            -- Folder "streamR" Vector.Persistent.fromList Vector.Persistent.Internal.streamSumR,
+            Folder "Data.RRBVector" RRBVector.fromList sum
+          ],
+      bgroup "equality" $
+        vectorFolders
+          [ Folder "normal" Vector.Persistent.fromList (\x -> Vector.Persistent.Internal.persistentVectorEq x x),
+            Folder "stream" Vector.Persistent.fromList (\x -> Vector.Persistent.Internal.persistentVectorStreamEq x x)
+          ],
+      bgroup "compare" $
+        vectorFolders
+          [ Folder "normal" Vector.Persistent.fromList Vector.Persistent.Internal.persistentVectorCompare
           ]
     ]
   where
@@ -184,8 +193,8 @@ sizes = take 4 allSizes
 allSizes :: [Int]
 allSizes = [10 ^ i | i <- [1 :: Int ..]]
 
-streamSumL :: Vector Int -> Int
-streamSumL = runIdentity . Stream.foldl' (+) 0 . streamL
+-- streamSumL :: Vector.Persistent.Vector Int -> Int
+-- streamSumL = runIdentity . Stream.foldl' (+) 0 . streamL
 
-streamSumR :: Vector Int -> Int
-streamSumR = runIdentity . Stream.foldl' (+) 0 . streamR
+-- streamSumR :: Vector.Persistent.Vector Int -> Int
+-- streamSumR = runIdentity . Stream.foldl' (+) 0 . streamR
