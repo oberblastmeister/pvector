@@ -163,7 +163,7 @@ instance Ord a => Ord (Node a) where
   compare = nodeCompare
   {-# INLINE compare #-}
 
-instance Show a => IsList (Vector a) where
+instance IsList (Vector a) where
   type Item (Vector a) = a
   fromList = Data.Vector.Persistent.Internal.fromList
   {-# INLINE fromList #-}
