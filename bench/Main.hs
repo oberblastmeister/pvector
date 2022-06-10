@@ -13,7 +13,7 @@ import Data.List qualified as List
 import Data.Maybe (fromJust)
 import Data.RRBVector qualified as RRBVector
 import Data.Sequence qualified as Seq
-import Data.Stream.Monadic qualified as Stream
+import Data.Vector.Fusion.Stream.Monadic qualified as Stream
 import Data.Vector qualified as VB
 import "persistent-vector" Data.Vector.Persistent qualified as Vector.Persistent.Other
 import "pvector" Data.Vector.Persistent.Strict qualified as Vector.Persistent

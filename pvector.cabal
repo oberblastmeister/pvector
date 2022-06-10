@@ -90,7 +90,8 @@ common common-options
     base >= 4.12 && <5,
     primitive >= 0.6.4.0 && <0.8,
     deepseq >=1.1 && <1.5,
-    vector-stream,
+    -- use this until vector-stream is released
+    vector >=0.12.1.2 && <0.13,
 
 library
   import: common-options

@@ -23,8 +23,8 @@ import Data.Functor.Classes
   )
 import Data.Functor.Identity (Identity (..))
 import Data.Primitive.SmallArray
-import Data.Stream.Monadic (Stream (Stream))
-import Data.Stream.Monadic qualified as Stream
+import Data.Vector.Fusion.Stream.Monadic (Stream (Stream))
+import Data.Vector.Fusion.Stream.Monadic qualified as Stream
 import Data.Traversable qualified as Traversable
 import Data.Vector.Persistent.Internal.Array
 import Data.Vector.Persistent.Internal.Array qualified as Array
