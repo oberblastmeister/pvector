@@ -8,7 +8,7 @@ module Data.Vector.Persistent.Internal where
 
 import Control.Applicative (Alternative, liftA2)
 import Control.Applicative qualified
-import Control.DeepSeq (NFData (rnf), NFData1)
+import Control.DeepSeq (NFData (rnf), NFData1, rnf1)
 import Control.DeepSeq qualified
 import Control.Monad (MonadPlus)
 import Control.Monad.Primitive (PrimMonad)
@@ -22,8 +22,6 @@ import Data.Functor.Classes
     showsUnaryWith,
   )
 import Data.Functor.Identity (Identity (..))
-import Data.Functor.WithIndex (FunctorWithIndex)
-import Data.Functor.WithIndex qualified
 import Data.Primitive.SmallArray
 import Data.Stream.Monadic (Stream (Stream))
 import Data.Stream.Monadic qualified as Stream
@@ -44,11 +42,15 @@ import Test.Inspection
 
 type role Vector representational
 
--- invariant: the only time tail can be empty is when init is empty
--- or else tailOffset will give the wrong value
-data Vector a = RootNode
+-- | A vector.
+--
+-- The instances are based on those of @Seq@s, which are in turn based on those of lists.
+data Vector a = -- |
+  -- Invariants: The only time tail can be empty is when init is empty.
+  -- Otherwise tailOffset will give the wrong value.
+  RootNode
   { size :: !Int,
-    -- 1 << shift is the maximum that each child can contain
+    -- | 1 << 'shift' is the maximum that each child can contain
     shift :: !Int,
     init :: !(Array (Node a)),
     tail :: !(Array a)
@@ -71,10 +73,6 @@ instance Ord a => Ord (Vector a) where
 instance Functor Vector where
   fmap = Data.Vector.Persistent.Internal.map
   {-# INLINE fmap #-}
-
-instance FunctorWithIndex Int Vector where
-  imap = Data.Vector.Persistent.Internal.imap
-  {-# INLINE imap #-}
 
 instance Foldable Vector where
   foldr = Data.Vector.Persistent.Internal.foldr
@@ -103,14 +101,13 @@ instance Monoid (Vector a) where
   {-# INLINE mempty #-}
 
 instance NFData a => NFData (Vector a) where
-  rnf RootNode {init, tail} = rnf init `seq` rnf tail
+  rnf = rnf1
   {-# INLINE rnf #-}
 
 instance Applicative Vector where
   pure = singleton
   {-# INLINE pure #-}
   fs <*> xs = Foldable.foldMap' (\f -> map f xs) fs
-  {-# INLINE (<*>) #-}
 
 instance Monad Vector where
   xs >>= f = Foldable.foldMap' f xs
@@ -128,13 +125,9 @@ instance Alternative Vector where
 
 instance MonadPlus Vector
 
-instance NFData a => NFData (Node a) where
-  rnf (DataNode as) = rnf as
-  rnf (InternalNode ns) = rnf ns
-
--- I think this is wrong
 instance NFData1 Vector where
-  liftRnf f = foldl' (\(_) x -> f x) ()
+  liftRnf f = foldl' (\_ x -> f x) ()
+  {-# INLINE liftRnf #-}
 
 data Node a
   = InternalNode {getInternalNode :: !(Array (Node a))}
@@ -156,34 +149,42 @@ instance IsList (Vector a) where
   toList = Data.Vector.Persistent.Internal.toList
   {-# INLINE toList #-}
 
+-- | \(O(n)\) Lazy right fold.
 foldr :: (a -> b -> b) -> b -> Vector a -> b
 foldr f z = runIdentity #. Stream.foldr f z . streamL
 {-# INLINE foldr #-}
 
+-- | \(O(n)\) Strict right fold.
 foldr' :: (a -> b -> b) -> b -> Vector a -> b
 foldr' f z = runIdentity #. Stream.foldl' (flip f) z . streamR
 {-# INLINE foldr' #-}
 
+-- | \(O(n)\) Lazy left fold.
 foldl :: (b -> a -> b) -> b -> Vector a -> b
 foldl f z = runIdentity #. Stream.foldr (flip f) z . streamR
 {-# INLINE foldl #-}
 
+-- | \(O(n)\) Strict left fold.
 foldl' :: (b -> a -> b) -> b -> Vector a -> b
 foldl' f z = runIdentity #. Stream.foldl' f z . streamL
 {-# INLINE foldl' #-}
 
+-- | \(O(n)\) Indexed lazy right fold.
 ifoldr :: (Int -> a -> b -> b) -> b -> Vector a -> b
 ifoldr f z = runIdentity #. Stream.foldr (uncurry f) z . istreamL
 {-# INLINE ifoldr #-}
 
+-- | \(O(n)\) Indexed lazy left fold.
 ifoldl :: (Int -> b -> a -> b) -> b -> Vector a -> b
 ifoldl f z = runIdentity #. Stream.foldr (\(i, x) y -> f i y x) z . istreamR
 {-# INLINE ifoldl #-}
 
+-- | \(O(n)\) Indexed strict right fold.
 ifoldr' :: (Int -> a -> b -> b) -> b -> Vector a -> b
 ifoldr' f z = runIdentity #. Stream.foldl' (\y (i, x) -> f i x y) z . istreamR
 {-# INLINE ifoldr' #-}
 
+-- | \(O(n)\) Indexed strict left fold.
 ifoldl' :: (Int -> b -> a -> b) -> b -> Vector a -> b
 ifoldl' f z = runIdentity #. Stream.foldl' (\y (i, x) -> f i y x) z . istreamL
 {-# INLINE ifoldl' #-}
@@ -230,10 +231,12 @@ nodeCompare (DataNode _) (InternalNode _) = LT
 nodeCompare (InternalNode _) (DataNode _) = GT
 {-# INLINEABLE nodeCompare #-}
 
+-- | \(O(1)\). A vector with a single element.
 singleton :: a -> Vector a
 singleton a = RootNode {size = 1, shift = keyBits, tail = singletonSmallArray a, init = emptySmallArray}
 {-# INLINE singleton #-}
 
+-- | \(O(1)\). The empty vector.
 empty :: Vector a
 empty = RootNode {size = 0, shift = keyBits, init = emptySmallArray, tail = emptySmallArray}
 {-# NOINLINE empty #-}
@@ -248,6 +251,7 @@ emptyMaxTail =
     }
 {-# NOINLINE emptyMaxTail #-}
 
+-- | \(O(1)\) Return 'True' if the vector is empty, 'False' otherwise.
 null :: Vector a -> Bool
 null xs = length xs == 0
 {-# INLINE null #-}
@@ -272,7 +276,7 @@ pattern Empty <-
 
 {-# COMPLETE (:|>), Empty #-}
 
--- | \( O(1) \) Append an element to the end of the vector.
+-- | \(O(\log n)\) Add an element to the end of the vector.
 snoc :: Vector a -> a -> Vector a
 snoc vec@RootNode {size, tail} a
   -- Room in tail, and vector non-empty
@@ -396,12 +400,14 @@ lookup# ix vec
   | otherwise = case Exts.inline unsafeIndex# vec ix of (# x #) -> (# | x #)
 {-# NOINLINE lookup# #-}
 
+-- | \(O(\log n)\). The element at the index or 'Nothing' if the index is out of range.
 lookup :: Int -> Vector a -> Maybe a
 lookup ix vec
   | (fromIntegral ix :: Word) >= fromIntegral (length vec) = Nothing
   | otherwise = case unsafeIndex# vec ix of (# x #) -> Just x
 {-# INLINE lookup #-}
 
+-- | \(O(\log n)\). The element at the index. Calls 'error' if the index is out of range.
 index :: HasCallStack => Int -> Vector a -> a
 index ix vec
   | ix < 0 = moduleError "index" $ "negative index: " ++ show ix
@@ -409,14 +415,18 @@ index ix vec
   | otherwise = Exts.inline unsafeIndex vec ix
 {-# INLINEABLE index #-}
 
+-- | \(O(\log n)\). A flipped version of 'index'.
 (!) :: HasCallStack => Vector a -> Int -> a
 (!) = flip index
 {-# INLINE (!) #-}
 
+-- | \(O(\log n)\). A flipped version of 'lookup'.
 (!?) :: Vector a -> Int -> Maybe a
 (!?) = flip lookup
 {-# INLINE (!?) #-}
 
+-- | \(O(\log n)\). Adjust the element at the index by applying the function to it.
+-- If the index is out of range, the original vector is returned.
 adjust :: (a -> a) -> Int -> Vector a -> Vector a
 adjust f = adjust# $ \x -> (# f x #)
 {-# INLINE adjust #-}
@@ -559,7 +569,6 @@ map f vec@RootNode {init, tail} = vec {tail = fmap f tail, init = mapSmallArray'
     go (InternalNode ns) = InternalNode $ mapSmallArray' go ns
 {-# INLINE map #-}
 
-
 imap :: (Int -> a -> b) -> Vector a -> Vector b
 imap f vec@RootNode {size, shift, init, tail}
   | size == 0 = empty
@@ -611,7 +620,11 @@ fromList :: [a] -> Vector a
 fromList = unstream . Stream.fromList
 
 keyBits :: Int
+#ifdef TEST
+keyBits = 1
+#else
 keyBits = 5
+#endif
 
 nodeWidth :: Int
 nodeWidth = 1 !<<. keyBits
@@ -737,5 +750,5 @@ istreamL = Stream.indexed . streamL
 {-# INLINE istreamL #-}
 
 istreamR :: Monad m => Vector a -> Stream m (Int, a)
-istreamR vec = Stream.indexedR (length vec) $ streamR vec
+istreamR vec = Stream.indexedR (length vec - 1) $ streamR vec
 {-# INLINE istreamR #-}

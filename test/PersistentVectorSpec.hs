@@ -2,11 +2,10 @@ module PersistentVectorSpec (spec) where
 
 import Data.Foldable (foldl')
 import Data.Function ((&))
-import Data.Functor.WithIndex (imap)
 import Data.Primitive.SmallArray
-import Data.Vector.Persistent (Vector)
-import qualified Data.Vector.Persistent.Internal as Vector
+import Data.Vector.Persistent.Internal qualified as Vector
 import Data.Vector.Persistent.Internal.Array
+import Data.Vector.Persistent.Strict (Vector)
 import GHC.Exts (fromList, toList)
 import Test.Hspec
 import Test.Hspec.QuickCheck
@@ -66,7 +65,7 @@ spec = parallel $ do
 
   describe "indexed" $ do
     prop "imap" $ \(l :: [Int]) ->
-      imap (,) l === toList (imap (,) (fromList @(Vector _) l))
+      zip [0 :: Int ..] l === toList (Vector.imap (,) (fromList @(Vector _) l))
 
 propUpdate :: Int -> Int -> [Int] -> Property
 propUpdate ix a l =
