@@ -115,9 +115,10 @@ library
   cpp-options: -DTEST
 
   -- uncomment to inspect generated code
-  -- ghc-options: -ddump-simpl -ddump-stg-final -ddump-cmm -ddump-asm -ddump-to-file
-  -- ghc-options: -dsuppress-coercions -dsuppress-unfoldings -dsuppress-module-prefixes
-  -- ghc-options: -dsuppress-uniques -dsuppress-timestamps
+  ghc-options: -O2
+  ghc-options: -ddump-simpl -ddump-stg-final -ddump-cmm -ddump-asm -ddump-to-file
+  ghc-options: -dsuppress-coercions -dsuppress-unfoldings -dsuppress-module-prefixes
+  ghc-options: -dsuppress-uniques -dsuppress-timestamps
 
 common rtsopts
   ghc-options:
