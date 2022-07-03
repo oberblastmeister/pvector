@@ -27,7 +27,6 @@ import Data.Stream.Monadic (Stream (Stream))
 import Data.Stream.Monadic qualified as Stream
 import Data.Traversable qualified as Traversable
 import Data.Vector.Persistent.Internal.Array
-import Data.Vector.Persistent.Internal.Array qualified as Array
 import Data.Vector.Persistent.Internal.Buffer qualified as Buffer
 import Data.Vector.Persistent.Internal.CoercibleUtils
 import GHC.Exts (IsList)
@@ -189,18 +188,6 @@ ifoldl' :: (Int -> b -> a -> b) -> b -> Vector a -> b
 ifoldl' f z = runIdentity #. Stream.foldl' (\y (i, x) -> f i y x) z . istreamL
 {-# INLINE ifoldl' #-}
 
-persistentVectorStreamEq :: Eq a => Vector a -> Vector a -> Bool
-persistentVectorStreamEq
-  v1@RootNode {size, shift}
-  v2@RootNode {size = size', shift = shift'} =
-    size == size'
-      && ( size == 0
-             || ( shift == shift'
-                    && runIdentity (Stream.and (Stream.zipWith (==) (streamL v1) (streamL v2)))
-                )
-         )
-{-# INLINEABLE persistentVectorStreamEq #-}
-
 persistentVectorEq :: Eq a => Vector a -> Vector a -> Bool
 persistentVectorEq
   RootNode {size, shift, init, tail}
@@ -240,16 +227,6 @@ singleton a = RootNode {size = 1, shift = keyBits, tail = singletonSmallArray a,
 empty :: Vector a
 empty = RootNode {size = 0, shift = keyBits, init = emptySmallArray, tail = emptySmallArray}
 {-# NOINLINE empty #-}
-
-emptyMaxTail :: Vector a
-emptyMaxTail =
-  RootNode
-    { size = 0,
-      shift = keyBits,
-      init = emptySmallArray,
-      tail = runSmallArray $ newSmallArray nodeWidth Array.undefinedElem
-    }
-{-# NOINLINE emptyMaxTail #-}
 
 -- | \(O(1)\) Return 'True' if the vector is empty, 'False' otherwise.
 null :: Vector a -> Bool
@@ -343,23 +320,6 @@ snocArr vec@RootNode {size, shift, tail} addedSize arr
         }
 {-# INLINE snocArr #-}
 
--- This is unsafe because it shrinks the tail in place
--- Shrinks the tail to the amount required by the size
--- This gets rid of any undefined elements
-unsafeShrink :: Vector a -> Vector a
-unsafeShrink vec@RootNode {size, tail}
-  -- we are empty
-  | size == 0 = vec {tail = emptySmallArray}
-  -- the tail is full, no undefined elements can be present
-  | size .&. keyMask == 0 = vec
-  -- shrink the tail
-  | otherwise = runST $ do
-      marr <- unsafeThawSmallArray tail
-      shrinkSmallMutableArray marr $ size .&. keyMask
-      arr <- unsafeFreezeSmallArray marr
-      pure vec {tail = arr}
-{-# INLINEABLE unsafeShrink #-}
-
 snocTail :: Int -> Array a -> Int -> Array (Node a) -> Array (Node a)
 snocTail size tail = go
   where
@@ -450,10 +410,6 @@ adjust# f ix vec@RootNode {size, shift, tail}
         ix' = (ix !>>. level) .&. keyBits
         vec' = indexSmallArray vec ix'
 {-# INLINE adjust# #-}
-
-adjustIdentity :: (a -> a) -> Int -> Vector a -> Vector a
-adjustIdentity f ix vec = runIdentity $ adjustF (pure . f) ix vec
-{-# INLINE adjustIdentity #-}
 
 adjustF :: Applicative f => (a -> f a) -> Int -> Vector a -> f (Vector a)
 adjustF f ix vec@RootNode {size, shift, tail}
