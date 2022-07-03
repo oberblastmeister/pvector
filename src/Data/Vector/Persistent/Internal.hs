@@ -233,10 +233,14 @@ null :: Vector a -> Bool
 null xs = length xs == 0
 {-# INLINE null #-}
 
+-- | \(O(\log n)\). An alias for 'snoc'
+-- Mnemonic: a triangle with the single element at the pointy end.
 (|>) :: Vector a -> a -> Vector a
 (|>) = snoc
 {-# INLINE (|>) #-}
 
+-- | \(O(\log n)\). A bidirectional pattern synonym viewing the rear of a non-empty
+-- sequence.
 pattern (:|>) :: Vector a -> a -> Vector a
 pattern vec :|> x <-
   (unsnoc -> Just (vec, x))
@@ -245,6 +249,7 @@ pattern vec :|> x <-
 
 infixl 5 :|>
 
+-- | \(O(1)\). A bidirectional pattern synonym matching an empty sequence.
 pattern Empty :: Vector a
 pattern Empty <-
   (null -> True)
@@ -411,6 +416,7 @@ adjust# f ix vec@RootNode {size, shift, tail}
         vec' = indexSmallArray vec ix'
 {-# INLINE adjust# #-}
 
+-- | \(O(\log n)\). Same as 'adjust' but can have effects through 'Applicative'
 adjustF :: Applicative f => (a -> f a) -> Int -> Vector a -> f (Vector a)
 adjustF f ix vec@RootNode {size, shift, tail}
   -- Invalid index. This funny business uses a single test to determine whether
@@ -431,13 +437,15 @@ adjustF f ix vec@RootNode {size, shift, tail}
         vec' = indexSmallArray vec ix'
 {-# INLINE adjustF #-}
 
+-- | \(O(\log n)\). Replace the element at the specified position.
+-- If the position is out of range, the original sequence is returned.
+update :: Int -> a -> Vector a -> Vector a
 -- we could use adjust# (\_ -> (# x #)) to implement this
 -- and the const like function would get optimized out
 -- but we don't because we don't want to create any closures for the go function
 -- so we rewrite out the loop and also lambda lift some arguments
 -- also: trees are very shallow, so the loop won't be called much.
 -- So allocating a closure to not have pass the arguments on the stack has too much overhead
-update :: Int -> a -> Vector a -> Vector a
 update ix x vec@RootNode {size, shift, tail}
   -- Invalid index. This funny business uses a single test to determine whether
   -- ix is too small (negative) or too large (at least sz).
@@ -457,6 +465,11 @@ update ix x vec@RootNode {size, shift, tail}
         vec' = indexSmallArray vec ix'
 {-# INLINEABLE update #-}
 
+-- | \(O(\log n)\). Decompose a list into its head and tail.
+--
+-- * If the list is empty, returns 'Nothing'.
+-- * If the list is non-empty, returns @'Just' (x, xs)@,
+-- where @x@ is the head of the list and @xs@ its tail.
 unsnoc :: Vector a -> Maybe (Vector a, a)
 unsnoc vec@RootNode {size, tail, init, shift}
   | 0 <- size = Nothing
@@ -497,7 +510,7 @@ tailOffset :: Vector a -> Int
 tailOffset vec = (length vec - 1) .&. ((-1) !<<. keyBits)
 {-# INLINE tailOffset #-}
 
--- | \( O(1) \) Get the length of the vector.
+-- | \(O(1)\) Get the length of the vector.
 length :: Vector a -> Int
 length = size
 {-# INLINE length #-}
@@ -518,6 +531,7 @@ pureStreamToList :: Stream Identity a -> [a]
 pureStreamToList s = Exts.build (\c n -> runIdentity $ Stream.foldr c n s)
 {-# INLINE pureStreamToList #-}
 
+-- | \(O(n)\). Apply a function to all values in the vector.
 map :: (a -> b) -> Vector a -> Vector b
 map f vec@RootNode {init, tail} = vec {tail = fmap f tail, init = mapSmallArray' go init}
   where
@@ -525,6 +539,7 @@ map f vec@RootNode {init, tail} = vec {tail = fmap f tail, init = mapSmallArray'
     go (InternalNode ns) = InternalNode $ mapSmallArray' go ns
 {-# INLINE map #-}
 
+-- | \(O(n)\). Apply a function to all values of a vector and its index.
 imap :: (Int -> a -> b) -> Vector a -> Vector b
 imap f vec@RootNode {size, shift, init, tail}
   | size == 0 = empty
@@ -562,9 +577,14 @@ itraverse f vec@RootNode {size, shift, init, tail}
     go shift i0 (InternalNode ns) = InternalNode <$> itraverseStepSmallArray i0 (1 !<<. shift) (go $! shift - keyBits) ns
 {-# INLINE itraverse #-}
 
+-- | \(O(n)\). For each pair @(i,a)@ from the vector of index/value pairs,
+-- replace the vector element at position @i@ by @a@.
+--
+-- > update <5,9,2,7> <(2,1),(0,3),(2,8)> = <3,9,8,7>
 (//) :: Vector a -> [(Int, a)] -> Vector a
 (//) = Exts.inline Foldable.foldl' $ flip $ uncurry update
 
+-- | \(O(n)\). Concatenate two vectors.
 (><) :: Vector a -> Vector a -> Vector a
 (><) = Exts.inline foldl' snoc
 
@@ -572,6 +592,7 @@ itraverse f vec@RootNode {size, shift, init, tail}
 invariant :: Vector a -> Bool
 invariant _vec = True
 
+-- | \(O(n)\). Create a vector from a list.
 fromList :: [a] -> Vector a
 fromList = unstream . Stream.fromList
 
