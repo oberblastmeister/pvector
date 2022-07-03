@@ -1,4 +1,4 @@
-module Data.Vector.Persistent.Lazy
+module Data.Vector.Persistent
   ( foldr,
     foldr',
     foldl,

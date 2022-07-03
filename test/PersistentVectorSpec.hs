@@ -3,9 +3,9 @@ module PersistentVectorSpec (spec) where
 import Data.Foldable (foldl')
 import Data.Function ((&))
 import Data.Primitive.SmallArray
+import Data.Vector.Persistent (Vector)
 import Data.Vector.Persistent.Internal qualified as Vector
 import Data.Vector.Persistent.Internal.Array
-import Data.Vector.Persistent.Strict (Vector)
 import GHC.Exts (fromList, toList)
 import Test.Hspec
 import Test.Hspec.QuickCheck

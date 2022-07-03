@@ -95,11 +95,9 @@ library
   import: common-options
   hs-source-dirs: src
   exposed-modules:
-    Data.Vector.Persistent.Strict
-    Data.Vector.Persistent.Lazy
+    Data.Vector.Persistent
     Data.Vector.Persistent.Unsafe
     Data.Vector.Persistent.Internal
-    Data.Vector.Persistent.Internal.Strict
     Data.Vector.Persistent.Internal.Buffer
     Data.Vector.Persistent.Internal.Array
     Data.Vector.Persistent.Internal.CoercibleUtils
