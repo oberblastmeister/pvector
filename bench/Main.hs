@@ -3,17 +3,14 @@
 module Main where
 
 import Control.DeepSeq (NFData)
-import Control.Monad.ST (runST)
 import Criterion.Main
 import Data.Foldable (foldl')
-import Data.Function ((&))
 import Data.HashMap.Strict (HashMap)
 import Data.HashMap.Strict qualified as HashMap
 import Data.List qualified as List
 import Data.Maybe (fromJust)
 import Data.RRBVector qualified as RRBVector
 import Data.Sequence qualified as Seq
-import Data.Vector.Fusion.Stream.Monadic qualified as Stream
 import Data.Vector qualified as VB
 import "persistent-vector" Data.Vector.Persistent qualified as Vector.Persistent.Other
 import "pvector" Data.Vector.Persistent.Strict qualified as Vector.Persistent

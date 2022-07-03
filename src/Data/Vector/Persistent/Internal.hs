@@ -3,12 +3,6 @@
 {-# LANGUAGE PartialTypeSignatures #-}
 {-# LANGUAGE RoleAnnotations #-}
 {-# LANGUAGE UnboxedTuples #-}
-{-# OPTIONS_GHC -ddump-simpl
--ddump-to-file
--dsuppress-module-prefixes
--dsuppress-coercions
--dsuppress-idinfo
--O2 #-}
 
 module Data.Vector.Persistent.Internal where
 
@@ -29,9 +23,9 @@ import Data.Functor.Classes
   )
 import Data.Functor.Identity (Identity (..))
 import Data.Primitive.SmallArray
+import Data.Stream.Monadic (Stream (Stream))
+import Data.Stream.Monadic qualified as Stream
 import Data.Traversable qualified as Traversable
-import Data.Vector.Fusion.Stream.Monadic (Stream (Stream))
-import Data.Vector.Fusion.Stream.Monadic qualified as Stream
 import Data.Vector.Persistent.Internal.Array
 import Data.Vector.Persistent.Internal.Array qualified as Array
 import Data.Vector.Persistent.Internal.Buffer qualified as Buffer
