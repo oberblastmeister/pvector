@@ -107,10 +107,10 @@ instance NFData a => NFData (Vector a) where
 instance Applicative Vector where
   pure = singleton
   {-# INLINE pure #-}
-  fs <*> xs = Foldable.foldMap' (\f -> map f xs) fs
+  fs <*> xs = foldl' (\acc f -> acc >< map f xs) empty fs
 
 instance Monad Vector where
-  xs >>= f = Foldable.foldMap' f xs
+  xs >>= f = foldl' (\acc x -> acc >< f x) empty xs
   {-# INLINE (>>=) #-}
 
 instance Fail.MonadFail Vector where
