@@ -2,6 +2,7 @@ module Data.Vector.Persistent.Internal.Buffer where
 
 import Control.Monad.Primitive
 import Data.Primitive.SmallArray
+import Data.Vector.Persistent.Internal.Array (shrinkSmallMutableArray_)
 import Prelude hiding (length)
 
 data Buffer s a = Buffer
@@ -49,7 +50,7 @@ shrink i buffer = buffer {offset = i}
 
 unsafeShrink :: (PrimMonad m, s ~ PrimState m) => Int -> Buffer s a -> m (Buffer s a)
 unsafeShrink i Buffer {marr} = do
-  shrinkSmallMutableArray marr i
+  marr <- shrinkSmallMutableArray_ marr i
   pure Buffer {marr, offset = i}
 {-# INLINE unsafeShrink #-}
 
@@ -88,6 +89,6 @@ freeze Buffer {marr, offset} = freezeSmallArray marr 0 offset
 
 unsafeFreeze :: (PrimMonad m, s ~ PrimState m) => Buffer s a -> m (SmallArray a)
 unsafeFreeze Buffer {marr, offset} = do
-  shrinkSmallMutableArray marr offset
+  marr <- shrinkSmallMutableArray_ marr offset
   unsafeFreezeSmallArray marr
 {-# INLINE unsafeFreeze #-}

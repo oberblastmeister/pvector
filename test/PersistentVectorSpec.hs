@@ -4,7 +4,7 @@ import Data.Foldable (foldl')
 import Data.Function ((&))
 import Data.Primitive.SmallArray
 import Data.Vector.Persistent (Vector)
-import Data.Vector.Persistent.Internal qualified as Vector
+import qualified Data.Vector.Persistent.Internal as Vector
 import Data.Vector.Persistent.Internal.Array
 import GHC.Exts (fromList, toList)
 import Test.Hspec
