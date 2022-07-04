@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE MagicHash #-}
 {-# LANGUAGE UnboxedSums #-}
 {-# LANGUAGE UnboxedTuples #-}
@@ -25,21 +26,33 @@ module Data.Vector.Persistent.Internal.Array
     itraverseStepSmallArray,
     modifySmallArray#,
     mapSmallArray#,
+    shrinkSmallMutableArray_,
   )
 where
 
 import Control.Applicative (liftA2)
 import Control.Monad (when)
-import Control.Monad.Primitive (PrimMonad)
+import Control.Monad.Primitive (PrimMonad, PrimState)
 import Control.Monad.ST (ST, runST)
 import Data.Coerce (coerce)
+import Data.Functor (($>))
 import Data.Functor.Identity (Identity (..))
+import qualified Data.Primitive as Primitive
 import Data.Primitive.SmallArray
 import GHC.Exts (SmallMutableArray#)
 
 type Array = SmallArray
 
 type MArray = SmallMutableArray
+
+-- | Used to support older ghcs.
+shrinkSmallMutableArray_ :: PrimMonad m => MArray (PrimState m) a -> Int -> m (MArray (PrimState m) a)
+#if __GLASGOW_HASKELL__ >= 810
+shrinkSmallMutableArray_ marr n = Primitive.shrinkSmallMutableArray marr n $> marr
+#else
+shrinkSmallMutableArray_ mary n = Primitive.cloneSmallMutableArray mary 0 n
+#endif 
+{-# INLINE shrinkSmallMutableArray_ #-}
 
 mapSmallArray# :: (a -> (# b #)) -> SmallArray a -> SmallArray b
 mapSmallArray# f sa = createSmallArray (length sa) (error "mapSmallArray#") $ \smb -> do
