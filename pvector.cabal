@@ -16,6 +16,9 @@ category: Data
 extra-source-files:
   CHANGELOG.md
   README.md
+extra-doc-files:
+  docs/diagram.png
+tested-with: GHC == 8.4.4, GHC == 8.6.5, GHC == 8.8.4, GHC == 8.10.7, GHC == 9.0.2, GHC == 9.2.2
 
 flag inspection
   description: Enable inspection testing
