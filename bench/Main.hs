@@ -6,15 +6,15 @@ import Control.DeepSeq (NFData)
 import Criterion.Main
 import Data.Foldable (foldl')
 import Data.HashMap.Strict (HashMap)
-import Data.HashMap.Strict qualified as HashMap
-import Data.List qualified as List
+import qualified Data.HashMap.Strict as HashMap
+import qualified Data.List as List
 import Data.Maybe (fromJust)
-import Data.RRBVector qualified as RRBVector
-import Data.Sequence qualified as Seq
-import Data.Vector qualified as VB
-import "persistent-vector" Data.Vector.Persistent qualified as Vector.Persistent.Other
-import "pvector" Data.Vector.Persistent qualified as Vector.Persistent
-import "pvector" Data.Vector.Persistent.Internal qualified as Vector.Persistent.Internal
+import qualified Data.RRBVector as RRBVector
+import qualified Data.Sequence as Seq
+import qualified Data.Vector as VB
+import qualified "persistent-vector" Data.Vector.Persistent as Vector.Persistent.Other
+import qualified "pvector" Data.Vector.Persistent as Vector.Persistent
+import qualified "pvector" Data.Vector.Persistent.Internal as Vector.Persistent.Internal
 import GHC.Exts (IsList (..))
 
 data Snocer where

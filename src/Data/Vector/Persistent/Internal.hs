@@ -7,14 +7,14 @@
 module Data.Vector.Persistent.Internal where
 
 import Control.Applicative (Alternative, liftA2)
-import Control.Applicative qualified
+import qualified Control.Applicative
 import Control.DeepSeq (NFData (rnf), NFData1, rnf1)
-import Control.DeepSeq qualified
+import qualified Control.DeepSeq
 import Control.Monad (MonadPlus)
 import Control.Monad.Primitive (PrimMonad)
 import Control.Monad.ST (runST)
 import Data.Bits (Bits, unsafeShiftL, unsafeShiftR, (.&.))
-import Data.Foldable qualified as Foldable
+import qualified Data.Foldable as Foldable
 import Data.Functor.Classes
   ( Show1,
     liftShowsPrec,
@@ -24,13 +24,13 @@ import Data.Functor.Classes
 import Data.Functor.Identity (Identity (..))
 import Data.Primitive.SmallArray
 import Data.Stream.Monadic (Stream (Stream))
-import Data.Stream.Monadic qualified as Stream
-import Data.Traversable qualified as Traversable
+import qualified Data.Stream.Monadic as Stream
+import qualified Data.Traversable as Traversable
 import Data.Vector.Persistent.Internal.Array
-import Data.Vector.Persistent.Internal.Buffer qualified as Buffer
+import qualified Data.Vector.Persistent.Internal.Buffer as Buffer
 import Data.Vector.Persistent.Internal.CoercibleUtils
 import GHC.Exts (IsList)
-import GHC.Exts qualified as Exts
+import qualified GHC.Exts as Exts
 import GHC.Stack (HasCallStack)
 import Prelude hiding (init, length, lookup, map, null, tail)
 
