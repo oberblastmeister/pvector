@@ -1,25 +1,21 @@
-cabal-version:      3.6
-name:               pvector
-version:            0.1.0.0
-
--- A short (one-line) description of the package.
--- synopsis:
-
--- A longer description of the package.
--- description:
-
--- A URL where users can report bugs.
--- bug-reports:
-
--- The license under which the package is released.
--- license:
-author:             brian
-maintainer:         littlebubu.shu@gmail.com
-
--- A copyright notice.
--- copyright:
--- category:
-extra-source-files: CHANGELOG.md
+cabal-version: 3.6
+name: pvector
+version: 0.1.0.0
+synopsis: Fast persistent vectors
+description:
+  An persistent vector is an efficient sequence data structure.
+  It supports fast indexing, iteration, snocing.
+homepage: https://github.com/oberblastmeister/pvector
+bug-reports: https://github.com/oberblastmeister/pvector/issues
+license: BSD-3-Clause
+license-file: LICENSE
+author: Brian Shu
+maintainer: littlebubu.shu@gmail.com
+copyright: 2022 Brian Shu
+category: Data
+extra-source-files:
+  CHANGELOG.md
+  README.md
 
 flag inspection
   description: Enable inspection testing
