@@ -1,0 +1,7 @@
+%% run
+%% mmdc -i docs/diagram.mmd -o docs/diagram.png
+graph TD
+A["Fast indexing"] -->|yes| B["Fast merging and spiltting"]
+A -->|no| E["Data.Sequence"]
+B -->|yes| C["Data.RRBVector"]
+B -->|no| D["Data.Persistent.Vector"]
