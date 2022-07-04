@@ -11,6 +11,7 @@ import qualified Control.Applicative
 import Control.DeepSeq (NFData (rnf), NFData1, rnf1)
 import qualified Control.DeepSeq
 import Control.Monad (MonadPlus)
+import qualified Control.Monad.Fail as Fail
 import Control.Monad.Primitive (PrimMonad)
 import Control.Monad.ST (runST)
 import Data.Bits (Bits, unsafeShiftL, unsafeShiftR, (.&.))
@@ -112,7 +113,7 @@ instance Monad Vector where
   xs >>= f = Foldable.foldMap' f xs
   {-# INLINE (>>=) #-}
 
-instance MonadFail Vector where
+instance Fail.MonadFail Vector where
   fail _ = empty
   {-# INLINE fail #-}
 
