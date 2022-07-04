@@ -20,20 +20,12 @@ extra-doc-files:
   docs/diagram.png
 tested-with: GHC == 8.4.4, GHC == 8.6.5, GHC == 8.8.4, GHC == 8.10.7, GHC == 9.0.2, GHC == 9.2.2
 
-flag inspection
-  description: Enable inspection testing
-  manual: True
-  default: False
-  
 flag debug
   description: Enable array bounds checking
   manual: True
   default: False
 
 common common-options
-  if flag(inspection)
-    cpp-options: -DINSPECTION
-
   default-language: Haskell2010
   default-extensions:
     FlexibleInstances,
@@ -56,7 +48,6 @@ common common-options
     ConstraintKinds,
     TypeApplications,
     KindSignatures,
-    StandaloneKindSignatures,
     DeriveFoldable,
     DeriveFunctor,
     DeriveGeneric,
@@ -99,9 +90,6 @@ library
     Data.Vector.Persistent.Internal.Buffer
     Data.Vector.Persistent.Internal.Array
     Data.Vector.Persistent.Internal.CoercibleUtils
-  if flag(inspection)
-    build-depends:
-      inspection-testing ^>= 0.4.6.0,
   if flag(debug)
     cpp-options: -DDEBUG
     if impl(ghc >= 9.2.2)
@@ -131,7 +119,6 @@ test-suite pvector-test
     hspec ^>= 2.9.4,
     QuickCheck ^>= 2.14.2,
     quickcheck-instances ^>= 0.3.27,
-    inspection-testing ^>= 0.4.6.0,
   build-tool-depends:
     hspec-discover:hspec-discover,
   cpp-options: -DTEST
@@ -148,5 +135,5 @@ benchmark pvector-bench
     rrb-vector ^>= 0.1.1.0,
     vector ^>= 0.12.3.1,
     unordered-containers ^>= 0.2.17.0,
-    containers ^>= 0.6.4.1,
+    containers >= 0.5.5.1 && < 0.7,
     persistent-vector ^>= 0.2.0,
