@@ -4,7 +4,7 @@ version: 0.1.0.0
 synopsis: Fast persistent vectors
 description:
   An persistent vector is an efficient sequence data structure.
-  It supports fast indexing, iteration, snocing.
+  It supports fast indexing, iteration, and snocing.
 homepage: https://github.com/oberblastmeister/pvector
 bug-reports: https://github.com/oberblastmeister/pvector/issues
 license: BSD-3-Clause
