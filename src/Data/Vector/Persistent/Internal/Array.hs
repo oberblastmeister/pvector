@@ -1,13 +1,12 @@
 {-# LANGUAGE CPP #-}
 {-# LANGUAGE MagicHash #-}
-{-# LANGUAGE UnboxedSums #-}
 {-# LANGUAGE UnboxedTuples #-}
 
 module Data.Vector.Persistent.Internal.Array
   ( Array,
     MArray,
     nullSmallArray,
-    lastSmallArray,
+    lastSmallArray#,
     singletonSmallArray,
     twoSmallArray,
     updateSmallArray,
@@ -27,6 +26,8 @@ module Data.Vector.Persistent.Internal.Array
     modifySmallArray#,
     mapSmallArray#,
     shrinkSmallMutableArray_,
+    snocSmallArray,
+    unsnocSmallArray,
   )
 where
 
@@ -68,8 +69,17 @@ nullSmallArray :: SmallArray a -> Bool
 nullSmallArray arr = sizeofSmallArray arr == 0
 {-# INLINE nullSmallArray #-}
 
-lastSmallArray :: SmallArray a -> a
-lastSmallArray arr = indexSmallArray arr $ sizeofSmallArray arr
+unsnocSmallArray :: SmallArray a -> Maybe (SmallArray a, a)
+unsnocSmallArray arr = do
+  let len = sizeofSmallArray arr
+  when (len == 0) Nothing
+  x <- indexSmallArrayM arr (len - 1)
+  let !arr' = cloneSmallArray arr 0 (len - 1)
+  pure (arr', x)
+{-# INLINE unsnocSmallArray #-}
+
+lastSmallArray# :: SmallArray a -> (# a #)
+lastSmallArray# arr = indexSmallArray## arr $ sizeofSmallArray arr
 
 singletonSmallArray :: a -> Array a
 singletonSmallArray a = runSmallArray $ newSmallArray 1 a
@@ -107,11 +117,19 @@ modifySmallArray# arr i f = runSmallArray $ do
   pure marr
 {-# INLINE modifySmallArray# #-}
 
-updateResizeSmallArray :: Array a -> Int -> a -> Array a
-updateResizeSmallArray arr i a = runSmallArray $ do
-  marr <- thawSmallArray arr 0 (max len (i + 1))
-  writeSmallArray marr i a
+snocSmallArray :: Array a -> a -> Array a
+snocSmallArray arr x = runSmallArray $ do
+  marr <- newSmallArray (sizeofSmallArray arr + 1) x
+  copySmallArray marr 0 arr 0 (sizeofSmallArray arr)
   pure marr
+{-# INLINE snocSmallArray #-}
+
+-- this is wrong
+updateResizeSmallArray :: Array a -> Int -> a -> Array a
+updateResizeSmallArray arr i a =
+  if i == len
+    then snocSmallArray arr a
+    else updateSmallArray arr i a
   where
     len = sizeofSmallArray arr
 {-# INLINE updateResizeSmallArray #-}

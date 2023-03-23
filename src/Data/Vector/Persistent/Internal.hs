@@ -45,16 +45,17 @@ type role Vector representational
 -- | A vector.
 --
 -- The instances are based on those of @Seq@s, which are in turn based on those of lists.
-data Vector a = -- |
-  -- Invariants: The only time tail can be empty is when init is empty.
-  -- Otherwise tailOffset will give the wrong value.
-  RootNode
-  { size :: !Int,
-    -- | 1 << 'shift' is the maximum that each child can contain
-    shift :: !Int,
-    init :: !(Array (Node a)),
-    tail :: !(Array a)
-  }
+data Vector a
+  = -- |
+    -- Invariants: The only time tail can be empty is when init is empty.
+    -- Otherwise tailOffset will give the wrong value.
+    RootNode
+    { size :: !Int,
+      -- | 1 << 'shift' is the maximum that each child can contain
+      shift :: !Int,
+      init :: !(Array (Node a)),
+      tail :: !(Array a)
+    }
 
 instance Show1 Vector where
   liftShowsPrec sp sl p v = showsUnaryWith (liftShowsPrec sp sl) "fromList" p (toList v)
@@ -265,7 +266,7 @@ snoc vec@RootNode {size, tail} a
   -- Room in tail, and vector non-empty
   | (size .&. keyMask) /= 0 =
       vec
-        { tail = updateResizeSmallArray tail (size .&. keyMask) a,
+        { tail = snocSmallArray tail a,
           size = size + 1
         }
   | otherwise = snocArr vec 1 $ singletonSmallArray a
@@ -355,14 +356,14 @@ unsafeIndex# vec ix
   | otherwise = go ix (shift vec - keyBits) (indexSmallArray (init vec) (ix !>>. shift vec))
   where
     go ix 0 !node = indexSmallArray## (getDataNode node) (ix .&. keyMask)
-    go ix level !node = go ix (level - keyBits) (indexSmallArray (getInternalNode node) ix')
+    go ix level !node = go ix (level - keyBits) node'
       where
-        ix' = (ix !>>. level) .&. keyMask
+        !(# node' #) = indexSmallArray## (getInternalNode node) ((ix !>>. level) .&. keyMask)
 {-# NOINLINE unsafeIndex# #-}
 
-lookup# :: Int -> Vector a -> (# (# #)| a #)
+lookup# :: Int -> Vector a -> (# (# #) | a #)
 lookup# ix vec
-  | (fromIntegral ix :: Word) >= fromIntegral (length vec) = (# (##) | #)
+  | (fromIntegral ix :: Word) >= fromIntegral (length vec) = (# (# #) | #)
   | otherwise = case Exts.inline unsafeIndex# vec ix of (# x #) -> (# | x #)
 {-# NOINLINE lookup# #-}
 
@@ -397,6 +398,7 @@ adjust :: (a -> a) -> Int -> Vector a -> Vector a
 adjust f = adjust# $ \x -> (# f x #)
 {-# INLINE adjust #-}
 
+-- needs better tests for this
 adjust# :: (a -> (# a #)) -> Int -> Vector a -> Vector a
 adjust# f ix vec@RootNode {size, shift, tail}
   -- Invalid index. This funny business uses a single test to determine whether
@@ -406,14 +408,14 @@ adjust# f ix vec@RootNode {size, shift, tail}
   | otherwise = vec {init = go ix shift (init vec)}
   where
     go ix level vec
-      | level == keyBits,
-        let !node = DataNode $ modifySmallArray# (getDataNode vec') (ix .&. keyMask) f =
-          updateSmallArray vec ix' node
-      | otherwise,
-        let !node = go ix (level - keyBits) (getInternalNode vec') =
-          updateSmallArray vec ix' $! InternalNode node
+      | level == keyBits =
+          let !node = DataNode $ modifySmallArray# (getDataNode vec') (ix .&. keyMask) f
+           in updateSmallArray vec ix' node
+      | otherwise =
+          let !node = go ix (level - keyBits) (getInternalNode vec')
+           in updateSmallArray vec ix' $! InternalNode node
       where
-        ix' = (ix !>>. level) .&. keyBits
+        ix' = (ix !>>. level) .&. keyMask
         vec' = indexSmallArray vec ix'
 {-# INLINE adjust# #-}
 
@@ -434,7 +436,7 @@ adjustF f ix vec@RootNode {size, shift, tail}
           (\node -> updateSmallArray vec ix' $! InternalNode node)
             <$> go ix (level - keyBits) (getInternalNode vec')
       where
-        ix' = (ix !>>. level) .&. keyBits
+        ix' = (ix !>>. level) .&. keyMask
         vec' = indexSmallArray vec ix'
 {-# INLINE adjustF #-}
 
@@ -476,13 +478,12 @@ unsnoc vec@RootNode {size, tail, init, shift}
   | 0 <- size = Nothing
   -- we need to have this case because we can't run unsnocTail, there is nothing left in the tail
   | 1 <- size, (# x #) <- indexSmallArray## tail 0 = Just (empty, x)
-  | nullSmallArray tail',
-    (# init', tail' #) <- unsnocTail# size shift init =
-      Just (vec {size = size - 1, init = init', tail = tail'}, a)
-  | otherwise = Just (vec {size = size - 1, tail = tail'}, a)
-  where
-    a = lastSmallArray tail
-    tail' = popSmallArray tail
+  | otherwise = case unsnocSmallArray tail of
+      Nothing ->
+        let !(# init', tail' #) = unsnocTail# size shift init
+            !(# x #) = lastSmallArray# tail'
+         in Just (vec {size = size - 1, init = init', tail = popSmallArray tail'}, x)
+      Just (tail', a) -> Just (vec {size = size - 1, tail = tail'}, a)
 {-# INLINEABLE unsnoc #-}
 
 unsnocTail# :: Int -> Int -> Array (Node a) -> (# Array (Node a), Array a #)
@@ -497,9 +498,7 @@ unsnocTail# = go
             else (# updateSmallArray parent subIx $ InternalNode child', tail #)
       where
         child = indexSmallArray parent subIx
-        -- we need to subtract 2 because the first subtraction gets us to the tail element
-        -- the second subtraction gets to the last element in the tree
-        subIx = ((size - 2) !>>. level) .&. keyMask
+        subIx = ((size - 1) !>>. level) .&. keyMask
 {-# INLINE unsnocTail# #-}
 
 -- | The index of the first element of the tail of the vector (that is, the
@@ -599,7 +598,7 @@ fromList = unstream . Stream.fromList
 
 keyBits :: Int
 #ifdef TEST
-keyBits = 1
+keyBits = 2
 #else
 keyBits = 5
 #endif
@@ -680,17 +679,17 @@ streamL RootNode {init, tail} = Stream step [(InternalNode init, 0 :: Int), (Dat
     step [] = pure Stream.Done
     step ((n, i) : rest) = case n of
       InternalNode ns
-        | i >= sizeofSmallArray ns -> pure $ Stream.Skip rest
-        | otherwise -> do
+        | i < sizeofSmallArray ns -> do
             let !(# ns' #) = indexSmallArray## ns i
                 !i' = i + 1
             pure $ Stream.Skip $ (ns', 0) : (n, i') : rest
+        | otherwise -> pure $ Stream.Skip rest
       DataNode xs
-        | i >= sizeofSmallArray xs -> pure $ Stream.Skip rest
-        | otherwise -> do
+        | i < sizeofSmallArray xs -> do
             let !(# x #) = indexSmallArray## xs i
                 !i' = i + 1
             pure $ Stream.Yield x $ (n, i') : rest
+        | otherwise -> pure $ Stream.Skip rest
     {-# INLINE step #-}
 {-# INLINE streamL #-}
 
@@ -707,13 +706,13 @@ streamR RootNode {init, tail} = Stream step [(DataNode tail, tailSize), (Interna
         | otherwise -> do
             let !(# n' #) = indexSmallArray## ns i
                 !i' = i - 1
-            pure $ case n' of
+            case n' of
               InternalNode ns -> do
                 let !z = sizeofSmallArray ns - 1
-                Stream.Skip $ (n', z) : (n, i') : rest
+                pure $ Stream.Skip $ (n', z) : (n, i') : rest
               DataNode xs -> do
                 let !z = sizeofSmallArray xs - 1
-                Stream.Skip $ (n', z) : (n, i') : rest
+                pure $ Stream.Skip $ (n', z) : (n, i') : rest
       DataNode xs
         | i < 0 -> pure $ Stream.Skip rest
         | otherwise -> do

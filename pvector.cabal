@@ -76,9 +76,14 @@ common common-options
     -Werror=missing-methods
   build-depends:
     base >= 4.12 && <5,
-    primitive >= 0.6.4.0 && <0.8,
     deepseq >=1.1 && <1.5,
     vector-stream ^>= 0.1.0.0,
+  if flag(debug)
+    build-depends:
+      primitive-checked,
+  else
+    build-depends:
+      primitive >= 0.6.4.0 && <0.8,
 
 library
   import: common-options
@@ -111,14 +116,19 @@ test-suite pvector-test
   import: common-options, rtsopts
   type: exitcode-stdio-1.0
   hs-source-dirs: test
-  main-is: Spec.hs
+  main-is: Main.hs
   other-modules:
-    PersistentVectorSpec
+    Properties
+    Arbitrary
   build-depends:
     pvector,
-    hspec ^>= 2.9.4,
-    QuickCheck ^>= 2.14.2,
-    quickcheck-instances ^>= 0.3.27,
+    containers,
+    tasty,
+    tasty-hunit,
+    tasty-quickcheck,
+    QuickCheck,
+    quickcheck-instances,
+    quickcheck-classes-base,
   build-tool-depends:
     hspec-discover:hspec-discover,
   cpp-options: -DTEST
