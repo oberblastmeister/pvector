@@ -1,6 +1,6 @@
 cabal-version: 3.0
 name: pvector
-version: 0.1.0.1
+version: 0.1.1
 synopsis: Fast persistent vectors
 description:
   An persistent vector is an efficient sequence data structure.
