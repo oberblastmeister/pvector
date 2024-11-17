@@ -76,14 +76,14 @@ common common-options
     -Werror=missing-methods
   build-depends:
     base >= 4.12 && <5,
-    deepseq >=1.1 && <1.5,
+    deepseq >=1.4.3.0,
     vector-stream ^>= 0.1.0.0,
   if flag(debug)
     build-depends:
       primitive-checked,
   else
     build-depends:
-      primitive >= 0.6.4.0 && <0.8,
+      primitive >= 0.6.4.0 && <0.10,
 
 library
   import: common-options
