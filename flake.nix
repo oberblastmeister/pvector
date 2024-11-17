@@ -18,7 +18,7 @@
       {
         devShell = pkgs.mkShell {
           buildInputs = with pkgs; [
-            haskell.compiler.ghc922
+            haskell.compiler.ghc982
             ormolu
             hlint
             haskell-language-server
